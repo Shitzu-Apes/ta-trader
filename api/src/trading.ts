@@ -33,7 +33,7 @@ const TRADING_CONFIG = {
 	STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss threshold
 	TAKE_PROFIT_THRESHOLD: 0.03, // +3% take profit threshold
 	INITIAL_BALANCE: 1000, // Initial USDC balance
-	OBV_WINDOW_SIZE: 8, // 2/3 hour window for slope calculation
+	OBV_WINDOW_SIZE: 12, // 1 hour window for slope calculation
 	SLOPE_THRESHOLD: 0.1, // Minimum slope difference to consider divergence
 
 	// AI score multipliers
@@ -46,7 +46,7 @@ const TRADING_CONFIG = {
 	BBANDS_MULTIPLIER: 1.5, // Bollinger Bands score multiplier
 	RSI_MULTIPLIER: 2, // RSI score multiplier
 	OBV_DIVERGENCE_MULTIPLIER: 0.8, // OBV divergence score multiplier
-	PROFIT_SCORE_MULTIPLIER: 1.5, // Profit-taking score multiplier (per 1% in profit)
+	PROFIT_SCORE_MULTIPLIER: 0.75, // Profit-taking score multiplier (per 1% in profit)
 	DEPTH_SCORE_MULTIPLIER: 1.2, // Orderbook depth imbalance score multiplier
 
 	// Score thresholds for trading decisions
@@ -248,7 +248,7 @@ function calculateTaSignal({
 
 		// RSI score
 		const rsiScore = calculateRsiScore(rsi) * TRADING_CONFIG.RSI_MULTIPLIER;
-		score -= rsiScore; // Subtract because negative score means buy
+		score += rsiScore;
 
 		// Calculate slopes for OBV divergence
 		const priceSlope = calculateSlope(prices, TRADING_CONFIG.OBV_WINDOW_SIZE);
@@ -303,7 +303,7 @@ function calculateTaSignal({
 
 		// RSI score
 		const rsiScore = calculateRsiScore(rsi) * TRADING_CONFIG.RSI_MULTIPLIER;
-		score -= rsiScore;
+		score += rsiScore;
 
 		// Calculate slopes for OBV divergence
 		const priceSlope = calculateSlope(prices, TRADING_CONFIG.OBV_WINDOW_SIZE);
@@ -333,13 +333,14 @@ function calculateTaSignal({
 			// Bearish imbalance
 			depthScore = -(askSize - bidSize) / bidSize;
 		}
-		score += depthScore * TRADING_CONFIG.DEPTH_SCORE_MULTIPLIER;
+		depthScore *= TRADING_CONFIG.DEPTH_SCORE_MULTIPLIER;
+		score += depthScore;
 
 		// Profit score for this specific partial
 		const priceDiff = (currentPrice - partial.entryPrice) / partial.entryPrice;
 		const profitScore =
-			priceDiff > 0 ? -priceDiff * TRADING_CONFIG.PROFIT_SCORE_MULTIPLIER * (1 + index * 0.5) : 0;
-		score += profitScore;
+			priceDiff * TRADING_CONFIG.PROFIT_SCORE_MULTIPLIER * 100 * (1 + index * 0.5);
+		score += priceDiff > 0 ? -profitScore : -profitScore * 0.25;
 
 		console.log(
 			`[${symbol}] [trade] TA (partial #${index + 1}):`,
