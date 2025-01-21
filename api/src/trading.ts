@@ -55,10 +55,9 @@ const TRADING_CONFIG = {
 
 	// Partial position thresholds
 	PARTIAL_POSITION_THRESHOLDS: [
-		{ buy: 2.5, sell: -1 }, // 1st position (25%)
-		{ buy: 5.5, sell: 1 }, // 2nd position (25%)
-		{ buy: 8.5, sell: 3 }, // 3rd position (25%)
-		{ buy: 11.5, sell: 5 } // 4th position (25%)
+		{ buy: 2, sell: -0.5 },
+		{ buy: 4, sell: 0.5 },
+		{ buy: 6, sell: 1.5 }
 	] as const
 } as const;
 
@@ -550,7 +549,8 @@ function getPositionThresholds(partialCount: number) {
 
 // Helper function to calculate next position size
 function calculateNextPositionSize(balance: number, partialCount: number): number {
-	const remainingPositions = 4 - partialCount;
+	const totalPartials = TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS.length;
+	const remainingPositions = totalPartials - partialCount;
 	if (remainingPositions <= 0) return 0;
 	return balance / remainingPositions;
 }
