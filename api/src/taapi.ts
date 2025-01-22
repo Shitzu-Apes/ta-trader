@@ -1,8 +1,4 @@
-import dayjs from 'dayjs';
-import { match } from 'ts-pattern';
-
 import { getCurrentTimeframe } from './datapoints';
-import { checkForecastAccuracy, makeForecast } from './forecast';
 import { analyzeForecast } from './trading';
 import { EnvBindings } from './types';
 
@@ -46,100 +42,6 @@ export type Indicators = {
 		avg_short_price: number;
 	};
 };
-
-type BulkResponseItem<T> = {
-	id: string;
-	result: T;
-	errors: string[];
-};
-
-type BulkResponse = {
-	data: (
-		| BulkResponseItem<Indicators['candle']>
-		| BulkResponseItem<Indicators['vwap']>
-		| BulkResponseItem<Indicators['atr']>
-		| BulkResponseItem<Indicators['bbands']>
-		| BulkResponseItem<Indicators['rsi']>
-		| BulkResponseItem<Indicators['obv']>
-	)[];
-};
-
-export type NixtlaForecastResponse = {
-	timestamp: string[];
-	value: number[];
-	input_tokens: number;
-	output_tokens: number;
-	finetune_tokens: number;
-	request_id: string;
-};
-
-async function sleep(ms: number) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchWithRetry<T>(
-	url: string,
-	maxRetries: number = 3,
-	baseDelay: number = 1000
-): Promise<T> {
-	let lastError: Error | null = null;
-
-	for (let attempt = 0; attempt < maxRetries; attempt++) {
-		try {
-			const response = await fetch(url);
-			if (!response.ok) {
-				const text = await response.text();
-				throw new Error(`HTTP error: [${response.status}] ${text}`);
-			}
-			return response.json();
-		} catch (error) {
-			lastError = error as Error;
-			console.error(`Attempt ${attempt + 1}/${maxRetries} failed:`, error);
-
-			if (attempt < maxRetries - 1) {
-				const delay = baseDelay * (attempt + 1); // Linear backoff
-				console.log(`Retrying in ${delay}ms...`);
-				await sleep(delay);
-			}
-		}
-	}
-
-	throw lastError ?? new Error('All retry attempts failed');
-}
-
-async function fetchDepth(symbol: string, env?: EnvBindings): Promise<Indicators['depth']> {
-	if (!env?.BINANCE_API_URL) {
-		throw new Error('BINANCE_API_URL environment variable is not set');
-	}
-
-	const encodedSymbol = encodeURIComponent(symbol);
-	return fetchWithRetry(`${env.BINANCE_API_URL}/depth/${encodedSymbol}`);
-}
-
-async function fetchLiquidationZones(
-	symbol: string,
-	env?: EnvBindings
-): Promise<Indicators['liq_zones']> {
-	if (!env?.BINANCE_API_URL) {
-		throw new Error('BINANCE_API_URL environment variable is not set');
-	}
-
-	const encodedSymbol = encodeURIComponent(symbol);
-	return fetchWithRetry(`${env.BINANCE_API_URL}/liquidation-zones/${encodedSymbol}`);
-}
-
-async function storeDatapoint(
-	db: D1Database,
-	symbol: string,
-	indicator: string,
-	timestamp: number,
-	data: unknown
-) {
-	const stmt = db.prepare(
-		'INSERT OR REPLACE INTO datapoints (symbol, indicator, timestamp, data) VALUES (?, ?, ?, ?)'
-	);
-	await stmt.bind(symbol, indicator, timestamp, JSON.stringify(data)).run();
-}
 
 export async function fetchHistoricalData(db: D1Database, symbol: string) {
 	const HISTORY_LIMIT = 12 * 24 * 7; // 7 days * 24 hours * 12 intervals per hour
@@ -237,191 +139,48 @@ export async function fetchHistoricalData(db: D1Database, symbol: string) {
 		throw new Error('No complete data found for any timestamp');
 	}
 
-	// Convert to Nixtla format
-	const timestamps = completeTimestamps.map((ts) => dayjs(ts).format('YYYY-MM-DD HH:mm:ss'));
-	const y: Record<string, number> = {};
-	const x: Record<string, number[]> = {};
-	const prices: number[] = [];
-	const obvs: number[] = [];
+	// Extract the latest values for analysis
+	const latestData = groupedData.get(completeTimestamps[completeTimestamps.length - 1])!;
+	const currentPrice = latestData.candle.close;
+	const vwap = latestData.vwap.value;
+	const bbandsUpper = latestData.bbands.valueUpperBand;
+	const bbandsLower = latestData.bbands.valueLowerBand;
+	const rsi = latestData.rsi.value;
+	const bidSize = latestData.depth.bid_size;
+	const askSize = latestData.depth.ask_size;
 
-	// Collect data only from complete timestamps
-	let lastObv = 0;
-	let vwap = 0;
-	let bbandsUpper = 0;
-	let bbandsLower = 0;
-	let rsi = 0;
-	let obvDelta = 0;
-	timestamps.forEach((ts, i) => {
-		const data = groupedData.get(completeTimestamps[i])!;
+	// Get historical prices and OBV values for technical analysis
+	const prices = completeTimestamps.map((ts) => groupedData.get(ts)!.candle.close);
+	const obvs = completeTimestamps.map((ts) => groupedData.get(ts)!.obv.value);
 
-		// Target variable (y)
-		y[ts] = data.candle.close;
-
-		// Store price and OBV data for divergence analysis
-		prices.push(data.candle.close);
-		obvs.push(data.obv.value);
-
-		// Exogenous variables (x)
-		vwap = data.vwap.value;
-		bbandsUpper = data.bbands.valueUpperBand;
-		bbandsLower = data.bbands.valueLowerBand;
-		rsi = data.rsi.value;
-		obvDelta = data.obv.value - lastObv;
-		x[ts] = [
-			data.candle.open,
-			data.candle.high,
-			data.candle.low,
-			data.candle.volume,
-			data.vwap.value,
-			data.atr.value,
-			data.bbands.valueUpperBand,
-			data.bbands.valueMiddleBand,
-			data.bbands.valueLowerBand,
-			data.rsi.value,
-			obvDelta,
-			data.depth.bid_size,
-			data.depth.ask_size
-		];
-		lastObv = data.obv.value;
-	});
-
-	return { timestamps, y, x, vwap, bbandsUpper, bbandsLower, rsi, prices, obvs };
+	return {
+		currentPrice,
+		vwap,
+		bbandsUpper,
+		bbandsLower,
+		rsi,
+		prices,
+		obvs,
+		bidSize,
+		askSize
+	};
 }
 
-export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
-	const now = dayjs();
-	const minutes = now.minute();
-	const currentTimeframe = Math.floor(minutes / 5) * 5;
-	const date = now.startOf('hour').add(currentTimeframe, 'minute');
-	const timestamp = date.valueOf();
-	const formattedTimestamp = date.format('YYYY-MM-DD HH:mm');
+export async function updateIndicators(env: EnvBindings, symbol: string): Promise<void> {
+	const { currentPrice, vwap, bbandsUpper, bbandsLower, rsi, prices, obvs, bidSize, askSize } =
+		await fetchHistoricalData(env.DB, symbol);
 
-	console.log('[date]', formattedTimestamp);
-
-	// Fetch depth and liquidation zones first
-	let depth;
-	try {
-		depth = await fetchDepth(symbol, env);
-		console.log(`[${symbol}]`, '[depth]', depth);
-		await storeDatapoint(env.DB, symbol, 'depth', timestamp, depth);
-	} catch (error) {
-		console.error('Error fetching depth:', error);
-		throw error;
-	}
-
-	try {
-		const liqZones = await fetchLiquidationZones(symbol, env);
-		console.log(`[${symbol}]`, '[liq_zones]', liqZones);
-		await storeDatapoint(env.DB, symbol, 'liq_zones', timestamp, liqZones);
-	} catch (error) {
-		console.error('Error fetching liquidation zones:', error);
-	}
-
-	// Fetch other indicators
-	const response = await fetch('https://api.taapi.io/bulk', {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify({
-			secret: env.TAAPI_SECRET,
-			construct: {
-				exchange: 'binance',
-				symbol,
-				interval: '5m',
-				indicators: [
-					{ id: 'candle', indicator: 'candle' },
-					{ id: 'vwap', indicator: 'vwap' },
-					{ id: 'atr', indicator: 'atr' },
-					{ id: 'bbands', indicator: 'bbands' },
-					{ id: 'rsi', indicator: 'rsi' },
-					{ id: 'obv', indicator: 'obv' }
-				]
-			}
-		})
-	});
-
-	const { data: bulkData } = (await response.json()) as BulkResponse;
-
-	await Promise.all(
-		bulkData.map(async (item) => {
-			match(item.id)
-				.with('candle', () => {
-					console.log(`[${symbol}]`, '[candle]', item.result);
-					// Check forecast accuracy with the actual close price
-					try {
-						checkForecastAccuracy(
-							env,
-							symbol,
-							(item.result as Indicators['candle']).close,
-							formattedTimestamp
-						);
-					} catch (error) {
-						console.error(`[${symbol}] [accuracy] Error checking forecast accuracy:`, error);
-					}
-					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
-				})
-				.with('vwap', () => {
-					console.log(`[${symbol}]`, '[vwap]', item.result);
-					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
-				})
-				.with('atr', () => {
-					console.log(`[${symbol}]`, '[atr]', item.result);
-					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
-				})
-				.with('bbands', () => {
-					console.log(`[${symbol}]`, '[bbands]', item.result);
-					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
-				})
-				.with('rsi', () => {
-					console.log(`[${symbol}]`, '[rsi]', item.result);
-					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
-				})
-				.with('obv', () => {
-					console.log(`[${symbol}]`, '[obv]', item.result);
-					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
-				})
-				.otherwise(() => {
-					console.log(`Unknown indicator: ${item.id}`);
-				});
-		})
+	await analyzeForecast(
+		env,
+		symbol,
+		currentPrice,
+		vwap,
+		bbandsUpper,
+		bbandsLower,
+		rsi,
+		prices,
+		obvs,
+		bidSize,
+		askSize
 	);
-
-	// Make forecast after all indicators are fetched and stored
-	try {
-		await new Promise((resolve) => setTimeout(resolve, 10_000));
-		const { forecast, vwap, bbandsUpper, bbandsLower, rsi, prices, obvs } = await makeForecast(
-			env,
-			symbol
-		);
-
-		// Get current price from candle data
-		const candleData = bulkData.find((d) => d.id === 'candle');
-		if (!candleData) {
-			throw new Error('Could not find candle data');
-		}
-		const currentPrice = (candleData.result as Indicators['candle']).close;
-		if (!currentPrice) {
-			throw new Error('Could not get current price from candle data');
-		}
-
-		// Analyze forecast and potentially open/close positions
-		await analyzeForecast(
-			env,
-			symbol,
-			currentPrice,
-			forecast,
-			vwap,
-			bbandsUpper,
-			bbandsLower,
-			rsi,
-			prices,
-			obvs,
-			depth.bid_size,
-			depth.ask_size
-		);
-	} catch (error) {
-		console.error('Error making forecast:', error);
-		throw error;
-	}
 }

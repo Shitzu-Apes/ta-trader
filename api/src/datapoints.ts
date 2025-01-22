@@ -2,7 +2,6 @@ import dayjs from 'dayjs';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import { NixtlaForecastResponse } from './forecast';
 import { Position } from './trading';
 import { EnvBindings } from './types';
 
@@ -227,39 +226,6 @@ app.get('/history/:symbol', async (c) => {
 		});
 	} catch (error) {
 		console.error('Error fetching historical data for all indicators:', error);
-		return c.json({ error: 'Internal server error' }, 500);
-	}
-});
-
-// Get forecast for a symbol
-app.get('/forecast/:symbol', async (c) => {
-	const symbol = c.req.param('symbol');
-
-	if (!symbolSchema.safeParse(symbol).success) {
-		return c.json({ error: 'Invalid symbol' }, 400);
-	}
-
-	try {
-		// Try to get the most recent forecast from cache
-		const cacheKey = `forecast:${symbol}`;
-		const lastForecastKey = `last_forecast:${symbol}`;
-
-		const cached = await c.env.KV.get<NixtlaForecastResponse>(cacheKey, 'json');
-		if (cached) {
-			console.log(`Cache hit for ${cacheKey}`);
-			return c.json(cached);
-		}
-
-		// If no cached forecast, try to get the last successful forecast
-		const lastForecast = await c.env.KV.get<NixtlaForecastResponse>(lastForecastKey, 'json');
-		if (lastForecast) {
-			console.log(`Using last available forecast for ${symbol}`);
-			return c.json(lastForecast);
-		}
-
-		return c.json({ error: 'No forecast data available yet' }, 404);
-	} catch (error) {
-		console.error('Error getting forecast:', error);
 		return c.json({ error: 'Internal server error' }, 500);
 	}
 });

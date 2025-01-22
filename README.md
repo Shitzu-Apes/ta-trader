@@ -1,13 +1,12 @@
-# AI Trader
+# Technical Trader
 
-An automated trading bot that uses machine learning to predict price movements and execute trades on the NEAR blockchain using the REF Finance DEX.
+An automated trading bot that uses technical analysis to execute trades on the NEAR blockchain using the Ref Finance DEX.
 
 ## Overview
 
 The bot combines several components to make trading decisions:
 
 - Cloudflare D1 (SQLite) for storing historical market data
-- TimeGPT (Nixtla) for price predictions
 - Technical indicators from TAAPI
 - Market data from Binance (via proxy)
 - REF Finance DEX for executing trades
@@ -21,37 +20,28 @@ The bot combines several components to make trading decisions:
    - Fetches orderbook depth and liquidation zones from Binance
    - Stores everything in Cloudflare D1
 
-2. **Price Prediction**
-   - Uses TimeGPT to forecast next 24 5-minute price points
-   - Applies time-decay weighting to prioritize near-term predictions
-   - Uses fine-tuning with MAE loss for better accuracy
-
-3. **Trading Strategy**
-   The bot uses a dual-signal approach, combining AI predictions with technical analysis:
-
-   **AI Signal:**
-   - Applies time-decay weighting to short-term predictions
-   - Uses tighter thresholds when position is open
-   - Generates buy/sell/hold signal based on weighted forecast vs current price
+2. **Trading Strategy**
+   The bot uses a comprehensive technical analysis approach:
 
    **Technical Analysis Signal:**
    - Calculates a score based on multiple indicators:
      - VWAP crossovers and divergence
      - Bollinger Bands breakouts
      - RSI oversold/overbought levels
-     - OBV momentum (using square root scaling)
-   - Generates buy/sell/hold signal based on final score
+     - OBV momentum and divergence
+     - Order book depth imbalance
+   - Uses dynamic scoring based on market conditions
+   - Implements partial position sizing based on signal strength
 
-   **Trading Decision:**
-   - Only executes trades when both signals agree (both buy or both sell)
-   - Uses REF Finance Smart Router API for best swap prices
+   **Position Management:**
+   - Uses multiple entry and exit points based on signal strength
    - Implements stop loss and take profit thresholds
    - All positions are unidirectional (no shorts)
+   - Uses REF Finance Smart Router API for best swap prices
 
-4. **Position Management**
+3. **Position Tracking**
    - Paper trading with simulated USDC balance
    - Tracks PnL, win rate, and other statistics
-   - All positions are unidirectional (no shorts)
    - Uses actual DEX prices/liquidity for realistic simulation
    - State stored in Cloudflare KV
 
@@ -61,15 +51,25 @@ The main configuration is in `trading.ts`:
 
 ```typescript
 const TRADING_CONFIG = {
-    DECAY_ALPHA: 0.92,              // Exponential decay for new positions
-    DECAY_ALPHA_EXISTING: 0.9,      // More conservative decay for existing
-    UPPER_THRESHOLD: 0.002,         // +0.2% threshold for buying
-    LOWER_THRESHOLD: -0.002,        // -0.2% threshold for selling
-    UPPER_THRESHOLD_EXISTING: 0.0005, // +0.05% when position exists
-    LOWER_THRESHOLD_EXISTING: -0.0005, // -0.05% when position exists
     STOP_LOSS_THRESHOLD: -0.02,     // -2% stop loss
-    TAKE_PROFIT_THRESHOLD: 0.05,    // +5% take profit
-    INITIAL_BALANCE: 1000           // Starting USDC balance
+    TAKE_PROFIT_THRESHOLD: 0.03,    // +3% take profit
+    INITIAL_BALANCE: 1000,          // Starting USDC balance
+    
+    // Technical Analysis Multipliers
+    VWAP_SCORE: 0.4,               // Base VWAP signal weight
+    VWAP_EXTRA_SCORE: 0.6,         // Additional VWAP signal weight
+    BBANDS_MULTIPLIER: 1.5,        // Bollinger Bands weight
+    RSI_MULTIPLIER: 2.0,           // RSI weight
+    OBV_DIVERGENCE_MULTIPLIER: 0.8, // OBV divergence weight
+    PROFIT_SCORE_MULTIPLIER: 0.75,  // Profit-taking weight
+    DEPTH_SCORE_MULTIPLIER: 1.2,    // Order book depth weight
+
+    // Partial Position Thresholds
+    PARTIAL_POSITION_THRESHOLDS: [
+        { buy: 2, sell: -0.5 },    // First partial
+        { buy: 4, sell: 0.5 },     // Second partial
+        { buy: 6, sell: 1.5 }      // Third partial
+    ]
 }
 ```
 
@@ -79,7 +79,6 @@ const TRADING_CONFIG = {
 
 ```bash
 NODE_URL=<NEAR RPC URL>
-NIXTLA_API_KEY=<TimeGPT API Key>
 TAAPI_SECRET=<TAAPI API Key>
 BINANCE_API_URL=<Binance API Proxy URL>
 ```
@@ -103,7 +102,6 @@ wrangler deploy
 
 - `/history/:symbol` - Get historical market data
 - `/latest/:symbol` - Get latest market data
-- `/forecast/:symbol` - Get current price forecast
 - `/position/:symbol` - Get current position
 - `/stats/:symbol` - Get trading statistics
 - `/portfolio` - Get overall portfolio status
@@ -113,7 +111,6 @@ wrangler deploy
 The bot logs detailed information about:
 
 - Data collection status
-- Forecast accuracy metrics (MAE, MAPE, R²)
 - Technical analysis scores
 - Trade decisions and reasoning
 - Position updates and PnL

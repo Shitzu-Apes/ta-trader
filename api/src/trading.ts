@@ -1,6 +1,5 @@
 import { FixedNumber } from './FixedNumber';
 import { Ref } from './ref';
-import { NixtlaForecastResponse } from './taapi';
 import { EnvBindings } from './types';
 
 // Symbol info for token addresses
@@ -24,21 +23,11 @@ const tokenInfo = {
 
 // Trading algorithm configuration
 const TRADING_CONFIG = {
-	DECAY_ALPHA: 0.92, // Exponential decay factor for new positions
-	DECAY_ALPHA_EXISTING: 0.9, // More conservative decay factor for existing positions
-	UPPER_THRESHOLD: 0.002, // +0.2% threshold for buying new positions
-	LOWER_THRESHOLD: -0.002, // -0.2% threshold for selling new positions
-	UPPER_THRESHOLD_EXISTING: 0.0005, // +0.05% threshold when position exists
-	LOWER_THRESHOLD_EXISTING: -0.0005, // -0.05% threshold when position exists
 	STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss threshold
 	TAKE_PROFIT_THRESHOLD: 0.03, // +3% take profit threshold
 	INITIAL_BALANCE: 1000, // Initial USDC balance
 	OBV_WINDOW_SIZE: 12, // 1 hour window for slope calculation
 	SLOPE_THRESHOLD: 0.1, // Minimum slope difference to consider divergence
-
-	// AI score multipliers
-	AI_SCORE_MULTIPLIER: 0, // Multiplier for new positions
-	AI_SCORE_MULTIPLIER_EXISTING: 0, // More conservative multiplier for existing positions
 
 	// TA score multipliers
 	VWAP_SCORE: 0.4, // Base score for VWAP signals
@@ -48,10 +37,6 @@ const TRADING_CONFIG = {
 	OBV_DIVERGENCE_MULTIPLIER: 0.8, // OBV divergence score multiplier
 	PROFIT_SCORE_MULTIPLIER: 0.75, // Profit-taking score multiplier (per 1% in profit)
 	DEPTH_SCORE_MULTIPLIER: 0, // Orderbook depth imbalance score multiplier
-
-	// Score thresholds for trading decisions
-	TOTAL_SCORE_BUY_THRESHOLD: 5, // Score above which to buy
-	TOTAL_SCORE_SELL_THRESHOLD: -3, // Score below which to sell
 
 	// Partial position thresholds
 	PARTIAL_POSITION_THRESHOLDS: [
@@ -93,29 +78,6 @@ function calculateSlope(values: number[], windowSize: number): number {
 	}
 
 	return denominator !== 0 ? numerator / denominator : 0;
-}
-
-/**
- * Calculate divergence score between price and OBV slopes
- * Returns a score between -1 and 1:
- * - Negative: Bearish divergence (price up, OBV down)
- * - Positive: Bullish divergence (price down, OBV up)
- * - Magnitude indicates strength of divergence
- */
-function detectSlopeDivergence(priceSlope: number, obvSlope: number, threshold: number): number {
-	// If slopes are too small, no significant divergence
-	if (Math.abs(priceSlope) < threshold) {
-		return 0;
-	}
-
-	// Calculate how strongly the slopes diverge
-	const divergenceStrength =
-		(priceSlope * -obvSlope) / Math.max(Math.abs(priceSlope), Math.abs(obvSlope));
-
-	// Scale the strength by how much price slope exceeds threshold
-	const scaleFactor = Math.min(Math.abs(priceSlope) / threshold, 1);
-
-	return divergenceStrength * scaleFactor;
 }
 
 /**
@@ -204,155 +166,95 @@ function calculateVwapScore(currentPrice: number, vwap: number): number {
 }
 
 /**
+ * Calculate OBV score based on divergence
+ */
+function calculateObvScore(prices: number[], obvs: number[]): number {
+	const priceSlope = calculateSlope(prices, TRADING_CONFIG.OBV_WINDOW_SIZE);
+	const obvSlope = calculateSlope(obvs, TRADING_CONFIG.OBV_WINDOW_SIZE);
+
+	// Divergence occurs when slopes have different signs
+	if (Math.sign(priceSlope) !== Math.sign(obvSlope)) {
+		// Return negative score for bearish divergence (price up, OBV down)
+		// Return positive score for bullish divergence (price down, OBV up)
+		return (
+			Math.sign(obvSlope) *
+			Math.min(Math.abs(priceSlope - obvSlope), TRADING_CONFIG.SLOPE_THRESHOLD)
+		);
+	}
+
+	return 0;
+}
+
+/**
+ * Calculate profit score based on current position
+ */
+function calculateProfitScore(position: Position, currentPrice: number): number {
+	if (!position || position.partials.length === 0) return 0;
+
+	// Calculate average entry price
+	const totalSize = position.size;
+	const weightedSum = position.partials.reduce(
+		(sum, partial) => sum + partial.size * partial.entryPrice,
+		0
+	);
+	const avgEntryPrice = weightedSum / totalSize;
+
+	// Calculate profit percentage
+	const profitPct = (currentPrice - avgEntryPrice) / avgEntryPrice;
+	return profitPct;
+}
+
+/**
+ * Calculate depth score based on order book imbalance
+ */
+function calculateDepthScore(bidSize: number, askSize: number): number {
+	const totalSize = bidSize + askSize;
+	if (totalSize === 0) return 0;
+
+	// Calculate bid/ask imbalance (-1 to 1)
+	return (bidSize - askSize) / totalSize;
+}
+
+/**
  * Calculate signal based on technical indicators
  * Returns an array of scores, one for each partial position
  * For no position, returns a single score
  */
-function calculateTaSignal({
-	symbol,
-	currentPrice,
-	vwap,
-	bbandsUpper,
-	bbandsLower,
-	rsi,
-	prices,
-	obvs,
-	position,
-	bidSize,
-	askSize
-}: {
-	symbol: string;
-	currentPrice: number;
-	vwap: number;
-	bbandsUpper: number;
-	bbandsLower: number;
-	rsi: number;
-	prices: number[];
-	obvs: number[];
-	position: Position | null;
-	bidSize: number;
-	askSize: number;
-}): number[] {
-	// If no position, calculate a single score
-	if (!position) {
-		let score = 0;
+function calculateTaScores(
+	position: Position | null,
+	currentPrice: number,
+	vwap: number,
+	bbandsUpper: number,
+	bbandsLower: number,
+	rsi: number,
+	prices: number[],
+	obvs: number[],
+	bidSize: number,
+	askSize: number
+): number[] {
+	// Calculate base scores
+	const vwapScore = calculateVwapScore(currentPrice, vwap);
+	const bbandsScore = calculateBBandsScore(currentPrice, bbandsUpper, bbandsLower);
+	const rsiScore = calculateRsiScore(rsi);
+	const obvScore = calculateObvScore(prices, obvs);
+	const profitScore = position ? calculateProfitScore(position, currentPrice) : 0;
+	const depthScore = calculateDepthScore(bidSize, askSize);
 
-		// VWAP score (only used when no position)
-		const vwapScore = calculateVwapScore(currentPrice, vwap) * TRADING_CONFIG.VWAP_SCORE;
-		score += vwapScore;
+	// For each partial position (or just once for new position)
+	const numScores = position ? position.partials.length : 1;
+	const scores: number[] = [];
 
-		// Bollinger Bands score
-		const bbandsScore = calculateBBandsScore(currentPrice, bbandsUpper, bbandsLower);
-		score += bbandsScore;
+	for (let i = 0; i < numScores; i++) {
+		const total =
+			vwapScore +
+			bbandsScore * TRADING_CONFIG.BBANDS_MULTIPLIER +
+			rsiScore * TRADING_CONFIG.RSI_MULTIPLIER +
+			obvScore * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER +
+			profitScore * TRADING_CONFIG.PROFIT_SCORE_MULTIPLIER +
+			depthScore * TRADING_CONFIG.DEPTH_SCORE_MULTIPLIER;
 
-		// RSI score
-		const rsiScore = calculateRsiScore(rsi) * TRADING_CONFIG.RSI_MULTIPLIER;
-		score += rsiScore;
-
-		// Calculate slopes for OBV divergence
-		const priceSlope = calculateSlope(prices, TRADING_CONFIG.OBV_WINDOW_SIZE);
-		const obvSlope = calculateSlope(obvs, TRADING_CONFIG.OBV_WINDOW_SIZE);
-
-		// Normalize slopes
-		const maxPrice = Math.max(...prices.slice(-TRADING_CONFIG.OBV_WINDOW_SIZE));
-		const maxObv = Math.max(...obvs.slice(-TRADING_CONFIG.OBV_WINDOW_SIZE));
-		const normalizedPriceSlope = (priceSlope / maxPrice) * 1000;
-		const normalizedObvSlope = (obvSlope / maxObv) * 1000;
-
-		// Divergence score
-		const divergenceScore =
-			detectSlopeDivergence(
-				normalizedPriceSlope,
-				normalizedObvSlope,
-				TRADING_CONFIG.SLOPE_THRESHOLD
-			) * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER;
-		score += divergenceScore;
-
-		// Orderbook depth imbalance score
-		let depthScore = 0;
-		if (bidSize > askSize) {
-			// Bullish imbalance
-			depthScore = (bidSize - askSize) / askSize;
-		} else if (askSize > bidSize) {
-			// Bearish imbalance
-			depthScore = -(askSize - bidSize) / bidSize;
-		}
-		score += depthScore * TRADING_CONFIG.DEPTH_SCORE_MULTIPLIER;
-
-		console.log(
-			`[${symbol}] [trade] TA (new position):`,
-			`Score=${score.toFixed(4)}`,
-			`VWAP=${vwap.toFixed(4)} (${vwapScore.toFixed(4)})`,
-			`BBands=${bbandsLower.toFixed(4)}/${bbandsUpper.toFixed(4)} (${bbandsScore.toFixed(4)})`,
-			`RSI=${rsi.toFixed(4)} (${rsiScore.toFixed(4)})`,
-			`OBV Divergence=${divergenceScore.toFixed(4)}`,
-			`Depth Score=${depthScore.toFixed(4)} (Bid=${bidSize.toFixed(2)}, Ask=${askSize.toFixed(2)})`
-		);
-
-		return [score];
+		scores.push(total);
 	}
-
-	// Calculate individual scores for each partial position
-	const scores = position.partials.map((partial, index) => {
-		let score = 0;
-
-		// Bollinger Bands score
-		const bbandsScore = calculateBBandsScore(currentPrice, bbandsUpper, bbandsLower);
-		score += bbandsScore;
-
-		// RSI score
-		const rsiScore = calculateRsiScore(rsi) * TRADING_CONFIG.RSI_MULTIPLIER;
-		score += rsiScore;
-
-		// Calculate slopes for OBV divergence
-		const priceSlope = calculateSlope(prices, TRADING_CONFIG.OBV_WINDOW_SIZE);
-		const obvSlope = calculateSlope(obvs, TRADING_CONFIG.OBV_WINDOW_SIZE);
-
-		// Normalize slopes
-		const maxPrice = Math.max(...prices.slice(-TRADING_CONFIG.OBV_WINDOW_SIZE));
-		const maxObv = Math.max(...obvs.slice(-TRADING_CONFIG.OBV_WINDOW_SIZE));
-		const normalizedPriceSlope = (priceSlope / maxPrice) * 1000;
-		const normalizedObvSlope = (obvSlope / maxObv) * 1000;
-
-		// Divergence score
-		const divergenceScore =
-			detectSlopeDivergence(
-				normalizedPriceSlope,
-				normalizedObvSlope,
-				TRADING_CONFIG.SLOPE_THRESHOLD
-			) * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER;
-		score += divergenceScore;
-
-		// Orderbook depth imbalance score
-		let depthScore = 0;
-		if (bidSize > askSize) {
-			// Bullish imbalance
-			depthScore = (bidSize - askSize) / askSize;
-		} else if (askSize > bidSize) {
-			// Bearish imbalance
-			depthScore = -(askSize - bidSize) / bidSize;
-		}
-		depthScore *= TRADING_CONFIG.DEPTH_SCORE_MULTIPLIER;
-		score += depthScore;
-
-		// Profit score for this specific partial
-		const priceDiff = (currentPrice - partial.entryPrice) / partial.entryPrice;
-		const profitScore =
-			priceDiff * TRADING_CONFIG.PROFIT_SCORE_MULTIPLIER * 100 * (1 + index * 0.5);
-		score += priceDiff > 0 ? -profitScore : -profitScore * 0.25;
-
-		console.log(
-			`[${symbol}] [trade] TA (partial #${index + 1}):`,
-			`Score=${score.toFixed(4)}`,
-			`BBands=${bbandsLower.toFixed(4)}/${bbandsUpper.toFixed(4)} (${bbandsScore.toFixed(4)})`,
-			`RSI=${rsi.toFixed(4)} (${rsiScore.toFixed(4)})`,
-			`OBV Divergence=${divergenceScore.toFixed(4)}`,
-			`Depth Score=${depthScore.toFixed(4)} (Bid=${bidSize.toFixed(2)}, Ask=${askSize.toFixed(2)})`,
-			`Profit Score=${profitScore.toFixed(4)}`
-		);
-
-		return score;
-	});
 
 	return scores;
 }
@@ -470,22 +372,6 @@ export async function updatePositionPnL(env: EnvBindings, symbol: string): Promi
 }
 
 /**
- * Applies exponential time-decay weighting to predictions
- */
-function getTimeDecayedAverage(predictions: number[], alpha: number): number {
-	let weightedSum = 0;
-	let weightTotal = 0;
-
-	for (let i = 0; i < predictions.length; i++) {
-		const weight = Math.pow(alpha, i);
-		weightedSum += predictions[i] * weight;
-		weightTotal += weight;
-	}
-
-	return weightedSum / weightTotal;
-}
-
-/**
  * Calculate actual price from swap amounts using FixedNumber
  */
 function calculateActualPrice(symbol: string, baseAmount: number, quoteAmount: number): number {
@@ -508,33 +394,6 @@ function calculateActualPrice(symbol: string, baseAmount: number, quoteAmount: n
 
 	// Price = quote/base (USDT/NEAR)
 	return fixedQuote.div(fixedBase).toNumber();
-}
-
-/**
- * Calculate AI score based on forecasted price difference
- * - For small differences (<=0.2%), use linear scaling
- * - For larger differences, apply logarithmic dampening
- * Multiply by configured multiplier to make it comparable to other scores
- */
-function calculateAiScore(diffPct: number, position: Position | null): number {
-	const threshold = 0.002; // ±0.2%
-	const multiplier = position
-		? TRADING_CONFIG.AI_SCORE_MULTIPLIER_EXISTING
-		: TRADING_CONFIG.AI_SCORE_MULTIPLIER;
-
-	// For small differences, use normal linear scaling
-	if (Math.abs(diffPct) <= threshold) {
-		return diffPct * multiplier;
-	}
-
-	// For larger differences, apply logarithmic dampening
-	// Keep the sign but dampen the magnitude
-	const sign = Math.sign(diffPct);
-	const baseDiff = sign * threshold;
-	const excessDiff = Math.abs(diffPct) - threshold;
-	const dampened = baseDiff + sign * Math.log10(1 + excessDiff * 10) * threshold;
-
-	return dampened * multiplier;
 }
 
 // Helper function to get thresholds based on partial positions
@@ -602,13 +461,12 @@ function shouldClosePartial(
 }
 
 /**
- * Analyze forecast and decide trading action
+ * Analyze market data and decide trading action
  */
 export async function analyzeForecast(
 	env: EnvBindings,
 	symbol: string,
 	currentPrice: number,
-	forecast: NixtlaForecastResponse,
 	vwap: number,
 	bbandsUpper: number,
 	bbandsLower: number,
@@ -618,81 +476,43 @@ export async function analyzeForecast(
 	bidSize: number,
 	askSize: number
 ): Promise<void> {
-	// Get current position if any
+	// Get current position if it exists
 	const currentPosition = await getPosition(env, symbol);
 	const partialCount = currentPosition?.partials.length ?? 0;
 
-	// Get thresholds based on current partial positions
-	const thresholds = getPositionThresholds(partialCount);
-
-	// Get actual price based on position
-	let actualPrice: number;
-	if (currentPosition && currentPosition.partials.length > 0) {
-		// If we have a position, check each partial position
-		const expectedUsdcAmount = await calculateSwapOutcome(symbol, currentPosition.size, false, env);
-		actualPrice = calculateActualPrice(symbol, currentPosition.size, expectedUsdcAmount);
-	} else {
-		// If we have no position, price is based on buying the next partial position
-		const balance = await getBalance(env);
-		if (balance <= 0) {
-			console.log(`[${symbol}] [trade] Insufficient balance: ${balance} USDC, using current price`);
-			actualPrice = currentPrice;
-		} else {
-			const nextPositionSize = calculateNextPositionSize(balance, partialCount);
-			const expectedNearAmount = await calculateSwapOutcome(symbol, nextPositionSize, true, env);
-			actualPrice = calculateActualPrice(symbol, expectedNearAmount, nextPositionSize);
-		}
+	// Get actual price from REF
+	const actualPrice = await getActualPrice(symbol, env);
+	if (!actualPrice) {
+		console.log(`[${symbol}] [trade] Failed to get actual price`);
+		return;
 	}
 
-	// Take only first 12 forecast datapoints (1 hour)
-	const shortTermForecast = forecast.value.slice(0, 12);
+	// Get thresholds based on partial positions
+	const thresholds = getThresholds(currentPosition);
 
-	// Use more conservative decay for existing positions
-	const decayAlpha = currentPosition
-		? TRADING_CONFIG.DECAY_ALPHA_EXISTING
-		: TRADING_CONFIG.DECAY_ALPHA;
+	console.log(`[${symbol}] [trade] Price:`, `Current=${currentPrice}`, `Actual=${actualPrice}`);
 
-	// Calculate time-decayed average of predicted prices
-	const decayedAvgPrice = getTimeDecayedAverage(shortTermForecast, decayAlpha);
-
-	// Calculate percentage difference using actual price
-	const diffPct = (decayedAvgPrice - currentPrice) / currentPrice;
-
-	// Calculate AI score
-	const aiScore = calculateAiScore(diffPct, currentPosition);
-
-	console.log(
-		`[${symbol}] [trade] AI:`,
-		`Score=${aiScore.toFixed(4)}`,
-		`Current=${currentPrice}`,
-		`Actual=${actualPrice}`,
-		`DecayedAvg=${decayedAvgPrice}`,
-		`Diff=${(diffPct * 100).toFixed(4)}%`
-	);
-
-	// Calculate TA scores (one per partial position or single score for new position)
-	const taScores = calculateTaSignal({
-		symbol,
-		currentPrice,
+	// Calculate technical analysis scores
+	const taScores = calculateTaScores(
+		currentPosition,
+		actualPrice,
 		vwap,
 		bbandsUpper,
 		bbandsLower,
 		rsi,
 		prices,
 		obvs,
-		position: currentPosition,
 		bidSize,
 		askSize
-	});
+	);
 
 	// Calculate total scores for each partial position
 	const totalScores = currentPosition
-		? currentPosition.partials.map((_, index) => aiScore + taScores[index])
-		: [aiScore + taScores[0]];
+		? currentPosition.partials.map((_, index) => taScores[index])
+		: [taScores[0]];
 
 	console.log(
 		`[${symbol}] [trade] Scores:`,
-		`AI=${aiScore.toFixed(4)} (${(diffPct * 100).toFixed(4)}%)`,
 		...totalScores.map(
 			(score, i) => `Total #${i + 1}=${score.toFixed(4)} (TA=${taScores[i].toFixed(4)})`
 		)
@@ -883,4 +703,30 @@ export async function analyzeForecast(
 	} else {
 		console.log(`[${symbol}] [trade] No position to hold`);
 	}
+}
+
+/**
+ * Get actual price from REF based on position size
+ */
+async function getActualPrice(symbol: string, env: EnvBindings): Promise<number | null> {
+	const balance = await getBalance(env);
+	if (balance <= 0) {
+		console.log(`[${symbol}] [trade] Insufficient balance: ${balance} USDC`);
+		return null;
+	}
+
+	const nextPositionSize = calculateNextPositionSize(balance, 0);
+	const expectedNearAmount = await calculateSwapOutcome(symbol, nextPositionSize, true, env);
+	return calculateActualPrice(symbol, expectedNearAmount, nextPositionSize);
+}
+
+/**
+ * Get thresholds based on position
+ */
+function getThresholds(position: Position | null): { buy: number; sell: number } {
+	const partialCount = position?.partials.length ?? 0;
+	return (
+		TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS[partialCount] ??
+		TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS[0]
+	);
 }
