@@ -47,7 +47,7 @@ const TRADING_CONFIG = {
 	RSI_MULTIPLIER: 2, // RSI score multiplier
 	OBV_DIVERGENCE_MULTIPLIER: 0.8, // OBV divergence score multiplier
 	PROFIT_SCORE_MULTIPLIER: 0.75, // Profit-taking score multiplier (per 1% in profit)
-	DEPTH_SCORE_MULTIPLIER: 1.2, // Orderbook depth imbalance score multiplier
+	DEPTH_SCORE_MULTIPLIER: 0, // Orderbook depth imbalance score multiplier
 
 	// Score thresholds for trading decisions
 	TOTAL_SCORE_BUY_THRESHOLD: 5, // Score above which to buy
@@ -770,10 +770,12 @@ export async function analyzeForecast(
 			await updateBalance(env, newBalance);
 
 			await updatePosition(env, updatedPosition);
-			return;
 		}
-	} else if (totalScores[0] > thresholds.buy) {
-		// Opening logic for new position
+	}
+
+	// Check if we should open a new position or add a partial
+	if (totalScores[0] > thresholds.buy) {
+		// Opening logic for new position or additional partial
 		const balance = await getBalance(env);
 		if (balance <= 0) {
 			console.log(`[${symbol}] [trade] Insufficient balance: ${balance} USDC`);
@@ -782,66 +784,103 @@ export async function analyzeForecast(
 
 		// Calculate size for next partial position
 		const nextPositionSize = calculateNextPositionSize(balance, partialCount);
+		if (nextPositionSize === 0) {
+			console.log(`[${symbol}] [trade] Maximum number of partial positions reached`);
+			return;
+		}
+
 		const expectedNearAmount = await calculateSwapOutcome(symbol, nextPositionSize, true, env);
 		const size = expectedNearAmount;
 
-		// Get previous trading stats
-		const statsKey = `stats:${symbol}`;
-		const stats = await env.KV.get<{
-			cumulativePnl: number;
-			successfulTrades: number;
-			totalTrades: number;
-		}>(statsKey, 'json');
+		if (currentPosition) {
+			// Add a new partial to existing position
+			console.log(`[${symbol}] [trade] Opening additional partial position #${partialCount + 1}`);
+			const newPartial: PartialPosition = {
+				size,
+				entryPrice: actualPrice,
+				openedAt: Date.now()
+			};
 
-		// Open new position with first partial
-		console.log(`[${symbol}] [trade] Opening first partial position`);
-		const firstPartial: PartialPosition = {
-			size,
-			entryPrice: actualPrice,
-			openedAt: Date.now()
-		};
+			const updatedPosition: Position = {
+				...currentPosition,
+				size: currentPosition.size + size,
+				lastUpdateTime: Date.now(),
+				partials: [...currentPosition.partials, newPartial]
+			};
 
-		const newPosition: Position = {
-			symbol,
-			size,
-			lastUpdateTime: Date.now(),
-			cumulativePnl: stats?.cumulativePnl ?? 0,
-			successfulTrades: stats?.successfulTrades ?? 0,
-			totalTrades: stats?.totalTrades ?? 0,
-			partials: [firstPartial]
-		};
+			await updatePosition(env, updatedPosition);
 
-		await updatePosition(env, newPosition);
+			// Update USDC balance
+			const newBalance = balance - nextPositionSize;
+			await updateBalance(env, newBalance);
 
-		// Update USDC balance
-		const newBalance = balance - nextPositionSize;
-		await updateBalance(env, newBalance);
-
-		console.log(
-			`[${symbol}] [trade] Position update:`,
-			`Added=${size} ${symbolInfo[symbol as keyof typeof symbolInfo].base}`,
-			`Value=${size * actualPrice} USDC`,
-			`Remaining Balance=${newBalance} USDC`
-		);
-	} else {
-		// Display current position state if it exists
-		if (currentPosition && currentPosition.partials.length > 0) {
-			const position = currentPosition;
 			console.log(
-				`[${symbol}] [trade] Current position:`,
-				`Total Size=${position.size}`,
-				`Partials=${position.partials.length}/4`
+				`[${symbol}] [trade] Position update:`,
+				`Added=${size} ${symbolInfo[symbol as keyof typeof symbolInfo].base}`,
+				`Value=${size * actualPrice} USDC`,
+				`Remaining Balance=${newBalance} USDC`,
+				`Total Partials=${updatedPosition.partials.length}`
 			);
-			position.partials.forEach((partial: PartialPosition, index: number) => {
-				console.log(
-					`[${symbol}] [trade] Partial #${index + 1}:`,
-					`Size=${partial.size}`,
-					`Entry=${partial.entryPrice}`,
-					`Age=${Math.floor((Date.now() - partial.openedAt) / (1000 * 60))}min`
-				);
-			});
 		} else {
-			console.log(`[${symbol}] [trade] No position to hold`);
+			// Get previous trading stats
+			const statsKey = `stats:${symbol}`;
+			const stats = await env.KV.get<{
+				cumulativePnl: number;
+				successfulTrades: number;
+				totalTrades: number;
+			}>(statsKey, 'json');
+
+			// Open new position with first partial
+			console.log(`[${symbol}] [trade] Opening first partial position`);
+			const firstPartial: PartialPosition = {
+				size,
+				entryPrice: actualPrice,
+				openedAt: Date.now()
+			};
+
+			const newPosition: Position = {
+				symbol,
+				size,
+				lastUpdateTime: Date.now(),
+				cumulativePnl: stats?.cumulativePnl ?? 0,
+				successfulTrades: stats?.successfulTrades ?? 0,
+				totalTrades: stats?.totalTrades ?? 0,
+				partials: [firstPartial]
+			};
+
+			await updatePosition(env, newPosition);
+
+			// Update USDC balance
+			const newBalance = balance - nextPositionSize;
+			await updateBalance(env, newBalance);
+
+			console.log(
+				`[${symbol}] [trade] Position update:`,
+				`Added=${size} ${symbolInfo[symbol as keyof typeof symbolInfo].base}`,
+				`Value=${size * actualPrice} USDC`,
+				`Remaining Balance=${newBalance} USDC`
+			);
 		}
+		return;
+	}
+
+	// Display current position state if it exists
+	if (currentPosition && currentPosition.partials.length > 0) {
+		const position = currentPosition;
+		console.log(
+			`[${symbol}] [trade] Current position:`,
+			`Total Size=${position.size}`,
+			`Partials=${position.partials.length}/4`
+		);
+		position.partials.forEach((partial: PartialPosition, index: number) => {
+			console.log(
+				`[${symbol}] [trade] Partial #${index + 1}:`,
+				`Size=${partial.size}`,
+				`Entry=${partial.entryPrice}`,
+				`Age=${Math.floor((Date.now() - partial.openedAt) / (1000 * 60))}min`
+			);
+		});
+	} else {
+		console.log(`[${symbol}] [trade] No position to hold`);
 	}
 }
