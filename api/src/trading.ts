@@ -157,7 +157,7 @@ function calculateVwapScore(currentPrice: number, vwap: number): number {
 	const additionalPercentage = Math.abs(vwapDiff) - TRADING_CONFIG.VWAP_THRESHOLD;
 	const score = Math.floor(additionalPercentage / TRADING_CONFIG.VWAP_THRESHOLD);
 
-	return (vwapDiff > 0 ? score : -score) * TRADING_CONFIG.VWAP_MULTIPLIER;
+	return vwapDiff > 0 ? score : -score;
 }
 
 /**
@@ -247,13 +247,24 @@ function calculateTaScores(
 	const profitScore = position ? calculateProfitScore(position, currentPrice) : 0;
 	const depthScore = calculateDepthScore(bidSize, askSize);
 
+	// Log individual scores
+	console.log(
+		'[trade] Individual scores:',
+		`VWAP=${(vwapScore * TRADING_CONFIG.VWAP_MULTIPLIER).toFixed(4)}`,
+		`BBands=${(bbandsScore * TRADING_CONFIG.BBANDS_MULTIPLIER).toFixed(4)}`,
+		`RSI=${(rsiScore * TRADING_CONFIG.RSI_MULTIPLIER).toFixed(4)}`,
+		`OBV=${(obvScore * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER).toFixed(4)}`,
+		`Profit=${(profitScore * TRADING_CONFIG.PROFIT_SCORE_MULTIPLIER).toFixed(4)}`,
+		`Depth=${(depthScore * TRADING_CONFIG.DEPTH_SCORE_MULTIPLIER).toFixed(4)}`
+	);
+
 	// For each partial position (or just once for new position)
 	const numScores = position ? position.partials.length : 1;
 	const scores: number[] = [];
 
 	for (let i = 0; i < numScores; i++) {
 		let total =
-			vwapScore +
+			vwapScore * TRADING_CONFIG.VWAP_MULTIPLIER +
 			bbandsScore * TRADING_CONFIG.BBANDS_MULTIPLIER +
 			rsiScore * TRADING_CONFIG.RSI_MULTIPLIER +
 			obvScore * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER +
@@ -264,6 +275,7 @@ function calculateTaScores(
 		if (position && position.partials[i]) {
 			const timeDecayScore = calculateTimeDecayScore(position.partials[i].openedAt);
 			total += timeDecayScore;
+			console.log(`[trade] Time decay score for partial #${i + 1}: ${timeDecayScore.toFixed(4)}`);
 		}
 
 		scores.push(total);
