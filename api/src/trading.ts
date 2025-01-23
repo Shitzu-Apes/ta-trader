@@ -30,20 +30,17 @@ const TRADING_CONFIG = {
 	SLOPE_THRESHOLD: 0.1, // Minimum slope difference to consider divergence
 
 	// TA score multipliers
-	VWAP_SCORE: 0.4, // Base score for VWAP signals
-	VWAP_EXTRA_SCORE: 0.6, // Additional score for stronger VWAP signals
+	VWAP_THRESHOLD: 0.01, // 1% threshold for VWAP signals
+	VWAP_MULTIPLIER: 0.5, // Base multiplier for VWAP signals
 	BBANDS_MULTIPLIER: 1.5, // Bollinger Bands score multiplier
 	RSI_MULTIPLIER: 2, // RSI score multiplier
 	OBV_DIVERGENCE_MULTIPLIER: 0.8, // OBV divergence score multiplier
 	PROFIT_SCORE_MULTIPLIER: 0.75, // Profit-taking score multiplier (per 1% in profit)
 	DEPTH_SCORE_MULTIPLIER: 0, // Orderbook depth imbalance score multiplier
+	TIME_DECAY_MULTIPLIER: 0.05, // Score reduction per minute for open positions
 
 	// Partial position thresholds
-	PARTIAL_POSITION_THRESHOLDS: [
-		{ buy: 2, sell: -0.5 },
-		{ buy: 4, sell: 0.5 },
-		{ buy: 6, sell: 1.5 }
-	] as const
+	PARTIAL_POSITION_THRESHOLDS: [{ buy: 2, sell: -0.5 }] as const
 } as const;
 
 /**
@@ -147,22 +144,20 @@ function calculateBBandsScore(currentPrice: number, upperBand: number, lowerBand
  * Returns a score where:
  * - Positive: VWAP above price (bullish)
  * - Negative: VWAP below price (bearish)
- * - Zero: Within 1% threshold
- * Score increases by 0.5 for each additional percentage point
+ * - Zero: Within threshold
  */
 function calculateVwapScore(currentPrice: number, vwap: number): number {
 	const vwapDiff = (vwap - currentPrice) / currentPrice;
-	const threshold = 0.01; // 1%
 
-	if (Math.abs(vwapDiff) <= threshold) {
+	if (Math.abs(vwapDiff) <= TRADING_CONFIG.VWAP_THRESHOLD) {
 		return 0;
 	}
 
 	// Calculate how many additional percentage points above threshold
-	const additionalPercentage = Math.abs(vwapDiff) - threshold;
-	const score = 0.5 * Math.floor(additionalPercentage / 0.01); // 0.5 per 1%
+	const additionalPercentage = Math.abs(vwapDiff) - TRADING_CONFIG.VWAP_THRESHOLD;
+	const score = Math.floor(additionalPercentage / TRADING_CONFIG.VWAP_THRESHOLD);
 
-	return vwapDiff > 0 ? score : -score;
+	return (vwapDiff > 0 ? score : -score) * TRADING_CONFIG.VWAP_MULTIPLIER;
 }
 
 /**
@@ -187,6 +182,7 @@ function calculateObvScore(prices: number[], obvs: number[]): number {
 
 /**
  * Calculate profit score based on current position
+ * Only returns a score for positive profits
  */
 function calculateProfitScore(position: Position, currentPrice: number): number {
 	if (!position || position.partials.length === 0) return 0;
@@ -201,7 +197,9 @@ function calculateProfitScore(position: Position, currentPrice: number): number 
 
 	// Calculate profit percentage
 	const profitPct = (currentPrice - avgEntryPrice) / avgEntryPrice;
-	return profitPct;
+
+	// Only return score if profit is positive
+	return profitPct > 0 ? profitPct : 0;
 }
 
 /**
@@ -213,6 +211,15 @@ function calculateDepthScore(bidSize: number, askSize: number): number {
 
 	// Calculate bid/ask imbalance (-1 to 1)
 	return (bidSize - askSize) / totalSize;
+}
+
+/**
+ * Calculate time decay score based on position age
+ * Returns a negative score that increases with time
+ */
+function calculateTimeDecayScore(openedAt: number): number {
+	const ageInMinutes = Math.floor((Date.now() - openedAt) / (1000 * 60));
+	return -ageInMinutes * TRADING_CONFIG.TIME_DECAY_MULTIPLIER;
 }
 
 /**
@@ -245,13 +252,19 @@ function calculateTaScores(
 	const scores: number[] = [];
 
 	for (let i = 0; i < numScores; i++) {
-		const total =
+		let total =
 			vwapScore +
 			bbandsScore * TRADING_CONFIG.BBANDS_MULTIPLIER +
 			rsiScore * TRADING_CONFIG.RSI_MULTIPLIER +
 			obvScore * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER +
 			profitScore * TRADING_CONFIG.PROFIT_SCORE_MULTIPLIER +
 			depthScore * TRADING_CONFIG.DEPTH_SCORE_MULTIPLIER;
+
+		// Add time decay score for existing positions
+		if (position && position.partials[i]) {
+			const timeDecayScore = calculateTimeDecayScore(position.partials[i].openedAt);
+			total += timeDecayScore;
+		}
 
 		scores.push(total);
 	}
@@ -397,20 +410,34 @@ function calculateActualPrice(symbol: string, baseAmount: number, quoteAmount: n
 }
 
 // Helper function to get thresholds based on partial positions
-function getPositionThresholds(partialCount: number) {
+function getThresholds(
+	position: Position | null,
+	partialIndex?: number
+): { buy: number; sell: number } {
+	// For new positions or specific partial index, use that index
+	const index = partialIndex ?? position?.partials.length ?? 0;
+
+	// If index exists in thresholds, use it, otherwise use first threshold
 	return (
-		TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS[partialCount] ??
-		TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS[
-			TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS.length - 1
-		]
+		TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS[index] ??
+		TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS[0]
 	);
 }
 
 // Helper function to calculate next position size
 function calculateNextPositionSize(balance: number, partialCount: number): number {
-	const totalPartials = TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS.length;
-	const remainingPositions = totalPartials - partialCount;
-	if (remainingPositions <= 0) return 0;
+	// If we've reached the maximum number of partial positions, return 0
+	if (partialCount >= TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS.length) {
+		return 0;
+	}
+
+	// If this is the last available position, use all remaining balance
+	const remainingPositions = TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS.length - partialCount;
+	if (remainingPositions === 1) {
+		return balance;
+	}
+
+	// Otherwise, split the balance evenly among remaining positions
 	return balance / remainingPositions;
 }
 
@@ -524,7 +551,7 @@ export async function analyzeForecast(
 		const partialsToClose: number[] = [];
 
 		position.partials.forEach((partial: PartialPosition, index: number) => {
-			const thresholds = getPositionThresholds(index);
+			const thresholds = getThresholds(position, index);
 			if (
 				totalScores[index] < thresholds.sell ||
 				shouldClosePartial(partial, currentPrice, index, thresholds)
@@ -595,6 +622,14 @@ export async function analyzeForecast(
 
 	// Check if we should open a new position or add a partial
 	if (totalScores[0] > thresholds.buy) {
+		// Check if we can add more partial positions
+		if (partialCount >= TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS.length) {
+			console.log(
+				`[${symbol}] [trade] Maximum number of partial positions (${TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS.length}) reached`
+			);
+			return;
+		}
+
 		// Opening logic for new position or additional partial
 		const balance = await getBalance(env);
 		if (balance <= 0) {
@@ -690,7 +725,7 @@ export async function analyzeForecast(
 		console.log(
 			`[${symbol}] [trade] Current position:`,
 			`Total Size=${position.size}`,
-			`Partials=${position.partials.length}/4`
+			`Partials=${position.partials.length}/${TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS.length}`
 		);
 		position.partials.forEach((partial: PartialPosition, index: number) => {
 			console.log(
@@ -707,26 +742,13 @@ export async function analyzeForecast(
 
 /**
  * Get actual price from REF based on position size
+ * Uses a default amount of 100 USDC if balance is zero
  */
 async function getActualPrice(symbol: string, env: EnvBindings): Promise<number | null> {
 	const balance = await getBalance(env);
-	if (balance <= 0) {
-		console.log(`[${symbol}] [trade] Insufficient balance: ${balance} USDC`);
-		return null;
-	}
+	const amountToUse = balance <= 0 ? 100 : balance;
 
-	const nextPositionSize = calculateNextPositionSize(balance, 0);
+	const nextPositionSize = calculateNextPositionSize(amountToUse, 0);
 	const expectedNearAmount = await calculateSwapOutcome(symbol, nextPositionSize, true, env);
 	return calculateActualPrice(symbol, expectedNearAmount, nextPositionSize);
-}
-
-/**
- * Get thresholds based on position
- */
-function getThresholds(position: Position | null): { buy: number; sell: number } {
-	const partialCount = position?.partials.length ?? 0;
-	return (
-		TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS[partialCount] ??
-		TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS[0]
-	);
 }

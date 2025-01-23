@@ -9,7 +9,7 @@ import { poweredBy } from 'hono/powered-by';
 import type { HTTPResponseError } from 'hono/types';
 
 import datapoints from './datapoints';
-import { fetchTaapiIndicators } from './taapi';
+import { updateIndicators } from './taapi';
 import { EnvBindings } from './types';
 
 // eslint-disable-next-line import/no-named-as-default-member
@@ -59,10 +59,10 @@ export default {
 	async scheduled(controller: ScheduledController, env: EnvBindings, ctx: ExecutionContext) {
 		switch (controller.cron) {
 			case '*/5 * * * *':
-				ctx.waitUntil(fetchTaapiIndicators('NEAR/USDT', env));
-				// ctx.waitUntil(fetchTaapiIndicators('SOL/USDT', env));
-				// ctx.waitUntil(fetchTaapiIndicators('BTC/USDT', env));
-				// ctx.waitUntil(fetchTaapiIndicators('ETH/USDT', env));
+				ctx.waitUntil(updateIndicators(env, 'NEAR/USDT'));
+				// ctx.waitUntil(updateIndicators(env, 'SOL/USDT'));
+				// ctx.waitUntil(updateIndicators(env, 'BTC/USDT'));
+				// ctx.waitUntil(updateIndicators(env, 'ETH/USDT'));
 				break;
 		}
 	}

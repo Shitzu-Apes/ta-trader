@@ -43,6 +43,146 @@ export type Indicators = {
 	};
 };
 
+type BulkResponseItem<T> = {
+	id: string;
+	result: T;
+	errors: string[];
+};
+
+type BulkResponse = {
+	data: (
+		| BulkResponseItem<Indicators['candle']>
+		| BulkResponseItem<Indicators['vwap']>
+		| BulkResponseItem<Indicators['atr']>
+		| BulkResponseItem<Indicators['bbands']>
+		| BulkResponseItem<Indicators['rsi']>
+		| BulkResponseItem<Indicators['obv']>
+	)[];
+};
+
+async function fetchWithRetry<T>(
+	url: string,
+	maxRetries: number = 3,
+	baseDelay: number = 1000
+): Promise<T> {
+	let lastError: Error | null = null;
+
+	for (let attempt = 0; attempt < maxRetries; attempt++) {
+		try {
+			const response = await fetch(url);
+			if (!response.ok) {
+				const text = await response.text();
+				throw new Error(`HTTP error: [${response.status}] ${text}`);
+			}
+			return response.json();
+		} catch (error) {
+			lastError = error as Error;
+			console.error(`Attempt ${attempt + 1}/${maxRetries} failed:`, error);
+
+			if (attempt < maxRetries - 1) {
+				const delay = baseDelay * (attempt + 1); // Linear backoff
+				console.log(`Retrying in ${delay}ms...`);
+				await new Promise((resolve) => setTimeout(resolve, delay));
+			}
+		}
+	}
+
+	throw lastError ?? new Error('All retry attempts failed');
+}
+
+async function fetchDepth(symbol: string, env?: EnvBindings): Promise<Indicators['depth']> {
+	if (!env?.BINANCE_API_URL) {
+		throw new Error('BINANCE_API_URL environment variable is not set');
+	}
+
+	const encodedSymbol = encodeURIComponent(symbol);
+	return fetchWithRetry(`${env.BINANCE_API_URL}/depth/${encodedSymbol}`);
+}
+
+async function fetchLiquidationZones(
+	symbol: string,
+	env?: EnvBindings
+): Promise<Indicators['liq_zones']> {
+	if (!env?.BINANCE_API_URL) {
+		throw new Error('BINANCE_API_URL environment variable is not set');
+	}
+
+	const encodedSymbol = encodeURIComponent(symbol);
+	return fetchWithRetry(`${env.BINANCE_API_URL}/liquidation-zones/${encodedSymbol}`);
+}
+
+async function storeDatapoint(
+	db: D1Database,
+	symbol: string,
+	indicator: string,
+	timestamp: number,
+	data: unknown
+) {
+	const stmt = db.prepare(
+		'INSERT OR REPLACE INTO datapoints (symbol, indicator, timestamp, data) VALUES (?, ?, ?, ?)'
+	);
+	await stmt.bind(symbol, indicator, timestamp, JSON.stringify(data)).run();
+}
+
+// Fetch and store technical indicators from TAAPI
+export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
+	const now = getCurrentTimeframe();
+	const timestamp = now.valueOf();
+
+	// Fetch depth and liquidation zones first
+	let depth;
+	try {
+		depth = await fetchDepth(symbol, env);
+		console.log(`[${symbol}]`, '[depth]', depth);
+		await storeDatapoint(env.DB, symbol, 'depth', timestamp, depth);
+	} catch (error) {
+		console.error('Error fetching depth:', error);
+		throw error;
+	}
+
+	try {
+		const liqZones = await fetchLiquidationZones(symbol, env);
+		console.log(`[${symbol}]`, '[liq_zones]', liqZones);
+		await storeDatapoint(env.DB, symbol, 'liq_zones', timestamp, liqZones);
+	} catch (error) {
+		console.error('Error fetching liquidation zones:', error);
+	}
+
+	// Fetch other indicators from TAAPI
+	const response = await fetch('https://api.taapi.io/bulk', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			secret: env.TAAPI_SECRET,
+			construct: {
+				exchange: 'binance',
+				symbol,
+				interval: '5m',
+				indicators: [
+					{ id: 'candle', indicator: 'candle' },
+					{ id: 'vwap', indicator: 'vwap' },
+					{ id: 'atr', indicator: 'atr' },
+					{ id: 'bbands', indicator: 'bbands' },
+					{ id: 'rsi', indicator: 'rsi' },
+					{ id: 'obv', indicator: 'obv' }
+				]
+			}
+		})
+	});
+
+	const { data: bulkData } = (await response.json()) as BulkResponse;
+
+	// Store each indicator
+	await Promise.all(
+		bulkData.map(async (item) => {
+			console.log(`[${symbol}]`, `[${item.id}]`, item.result);
+			await storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
+		})
+	);
+}
+
 export async function fetchHistoricalData(db: D1Database, symbol: string) {
 	const HISTORY_LIMIT = 12 * 24 * 7; // 7 days * 24 hours * 12 intervals per hour
 
@@ -167,6 +307,11 @@ export async function fetchHistoricalData(db: D1Database, symbol: string) {
 }
 
 export async function updateIndicators(env: EnvBindings, symbol: string): Promise<void> {
+	await fetchTaapiIndicators(symbol, env);
+
+	await new Promise((resolve) => setTimeout(resolve, 5_000));
+
+	// Get historical data and analyze
 	const { currentPrice, vwap, bbandsUpper, bbandsLower, rsi, prices, obvs, bidSize, askSize } =
 		await fetchHistoricalData(env.DB, symbol);
 
