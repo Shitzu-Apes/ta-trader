@@ -8,7 +8,6 @@ The bot combines several components to make trading decisions:
 
 - Cloudflare D1 (SQLite) for storing historical market data
 - Technical indicators from TAAPI
-- Market data from Binance (via proxy)
 - REF Finance DEX for executing trades
 - Cloudflare Workers for serverless deployment
 - Cloudflare KV for state management
@@ -17,7 +16,6 @@ The bot combines several components to make trading decisions:
 
 1. **Data Collection (Every 5 minutes)**
    - Gets technical indicators from TAAPI (VWAP, ATR, Bollinger Bands, RSI, OBV)
-   - Fetches orderbook depth and liquidation zones from Binance
    - Stores everything in Cloudflare D1
 
 2. **Trading Strategy**
@@ -29,40 +27,48 @@ The bot combines several components to make trading decisions:
      - Bollinger Bands breakouts
      - RSI oversold/overbought levels
      - OBV momentum and divergence
-     - Order book depth imbalance
    - Uses dynamic scoring based on market conditions
    - Implements partial position sizing based on signal strength
 
    **Position Management:**
    - Uses multiple entry and exit points based on signal strength
    - Implements stop loss and take profit thresholds
-   - All positions are unidirectional (no shorts)
    - Uses REF Finance Smart Router API for best swap prices
+   - Supports partial positions with independent tracking
+   - Time decay to gradually reduce position scores
+   - Profit-taking score to encourage closing profitable trades
 
 3. **Position Tracking**
    - Paper trading with simulated USDC balance
    - Tracks PnL, win rate, and other statistics
-   - Uses actual DEX prices/liquidity for realistic simulation
+   - Uses actual DEX prices for realistic simulation
    - State stored in Cloudflare KV
 
 ## Configuration
 
-The main configuration is in `trading.ts`:
+The main configuration is in `config.ts`:
 
 ```typescript
-const TRADING_CONFIG = {
+// Trading configuration
+export const TRADING_CONFIG = {
+    // Position thresholds
     STOP_LOSS_THRESHOLD: -0.02,     // -2% stop loss
     TAKE_PROFIT_THRESHOLD: 0.03,    // +3% take profit
     INITIAL_BALANCE: 1000,          // Starting USDC balance
-    
+
     // Technical Analysis Multipliers
-    VWAP_SCORE: 0.4,               // Base VWAP signal weight
-    VWAP_EXTRA_SCORE: 0.6,         // Additional VWAP signal weight
+    VWAP_MULTIPLIER: 0.4,          // Base VWAP signal weight
+    VWAP_EXTRA_MULTIPLIER: 0.6,    // Additional VWAP signal weight
     BBANDS_MULTIPLIER: 1.5,        // Bollinger Bands weight
     RSI_MULTIPLIER: 2.0,           // RSI weight
     OBV_DIVERGENCE_MULTIPLIER: 0.8, // OBV divergence weight
     PROFIT_SCORE_MULTIPLIER: 0.75,  // Profit-taking weight
-    DEPTH_SCORE_MULTIPLIER: 1.2,    // Order book depth weight
+    TIME_DECAY_MULTIPLIER: 0.0001,  // Time decay weight per minute
+
+    // Technical Analysis Parameters
+    VWAP_THRESHOLD: 0.01,          // 1% threshold for VWAP signals
+    OBV_WINDOW_SIZE: 12,           // 1 hour window for OBV analysis
+    SLOPE_THRESHOLD: 0.0001,       // Minimum slope for divergence detection
 
     // Partial Position Thresholds
     PARTIAL_POSITION_THRESHOLDS: [
@@ -80,7 +86,6 @@ const TRADING_CONFIG = {
 ```bash
 NODE_URL=<NEAR RPC URL>
 TAAPI_SECRET=<TAAPI API Key>
-BINANCE_API_URL=<Binance API Proxy URL>
 ```
 
 2. Database:
@@ -118,12 +123,17 @@ The bot logs detailed information about:
 
 ## Supported Markets
 
-Currently supports NEAR/USDT on REF Finance with the following features:
+Currently supports multiple trading pairs on REF Finance:
+- NEAR/USDT
+- SOL/USDT
+- BTC/USDT
+- ETH/USDT
 
-- Real-time price data via Binance API proxy
-- Full orderbook depth
+Features:
+- Real-time price data via TAAPI
 - Smart Router API for best swap prices
-- Position tracking
+- Position tracking with partial positions
+- PnL and statistics tracking
 
 ## Development
 
@@ -137,10 +147,12 @@ To run locally:
 
 ## Architecture Notes
 
-- Uses a separate Binance API proxy service since Cloudflare Workers IP ranges are blocked by Binance
+- Uses TAAPI for reliable technical indicators
 - Trading decisions use current market price for signals but actual DEX prices for execution
 - All state is maintained in Cloudflare KV for serverless operation
-- Uses REF Finance Smart Router API with fallback to single pool for best prices
+- Uses REF Finance Smart Router API for best prices
+- Supports multiple partial positions with independent tracking
+- Implements time decay and profit-taking mechanics
 
 ## Contributing
 

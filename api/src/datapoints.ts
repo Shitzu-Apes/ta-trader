@@ -2,13 +2,16 @@ import dayjs from 'dayjs';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
+import { ExchangeType } from './adapters';
+import { getAdapter } from './adapters';
+import { TRADING_CONFIG } from './config';
 import { Position } from './trading';
 import { EnvBindings } from './types';
 
 const app = new Hono<{ Bindings: EnvBindings }>();
 
-const symbolSchema = z.enum(['NEAR/USDT', 'SOL/USDT', 'BTC/USDT', 'ETH/USDT'] as const);
-const indicatorSchema = z.enum(['candle', 'vwap', 'atr', 'bbands', 'rsi', 'obv', 'depth'] as const);
+const symbolSchema = z.enum(TRADING_CONFIG.SUPPORTED_SYMBOLS);
+const indicatorSchema = z.enum(['candle', 'vwap', 'atr', 'bbands', 'rsi', 'obv'] as const);
 
 type DataPoint = {
 	id: number;
@@ -233,9 +236,11 @@ app.get('/history/:symbol', async (c) => {
 // Get current USDC balance
 app.get('/balance', async (c) => {
 	try {
-		const balance = await c.env.KV.get<number>('balance:USDC', 'json');
+		const adapter = getAdapter(c.env);
+		const balance = await adapter.getBalance();
+
 		return c.json({
-			balance: balance ?? 1000,
+			balance,
 			currency: 'USDC'
 		});
 	} catch (error) {
@@ -253,7 +258,9 @@ app.get('/position/:symbol', async (c) => {
 	}
 
 	try {
-		const position = await c.env.KV.get<Position>(`position:${symbol}`, 'json');
+		const adapter = getAdapter(c.env);
+		const position = await adapter.getPosition(symbol);
+
 		if (!position) {
 			return c.json({ error: 'No active position' }, 404);
 		}
@@ -301,8 +308,10 @@ app.get('/stats/:symbol', async (c) => {
 // Get all positions and stats
 app.get('/portfolio', async (c) => {
 	try {
+		const adapter = getAdapter(c.env);
+
 		// Get current balance
-		const balance = (await c.env.KV.get<number>('balance:USDC', 'json')) ?? 1000;
+		const balance = await adapter.getBalance();
 
 		// Get all positions
 		const positions: Record<string, Position> = {};
@@ -318,22 +327,14 @@ app.get('/portfolio', async (c) => {
 
 		// Process each supported symbol
 		for (const symbol of symbolSchema.options) {
-			const position = await c.env.KV.get<Position>(`position:${symbol}`, 'json');
+			const position = await adapter.getPosition(symbol);
 			if (position) {
 				positions[symbol] = position;
-			}
-
-			const symbolStats = await c.env.KV.get<{
-				cumulativePnl: number;
-				successfulTrades: number;
-				totalTrades: number;
-			}>(`stats:${symbol}`, 'json');
-
-			if (symbolStats) {
 				stats[symbol] = {
-					...symbolStats,
-					winRate:
-						symbolStats.totalTrades > 0 ? symbolStats.successfulTrades / symbolStats.totalTrades : 0
+					cumulativePnl: position.cumulativePnl,
+					successfulTrades: position.successfulTrades,
+					totalTrades: position.totalTrades,
+					winRate: position.totalTrades > 0 ? position.successfulTrades / position.totalTrades : 0
 				};
 			} else {
 				stats[symbol] = {
@@ -356,24 +357,48 @@ app.get('/portfolio', async (c) => {
 	}
 });
 
-// Delete all positions and reset balance (for testing)
+// Delete all positions and reset balance (for paper trading only)
 app.post('/reset', async (c) => {
+	// Only allow reset for paper trading
+	if (TRADING_CONFIG.ADAPTER !== 'paper') {
+		return c.json({ error: 'Reset is only available for paper trading' }, 400);
+	}
+
 	try {
-		// Delete all positions and stats
+		const adapter = getAdapter(c.env);
+
+		// First try to close all positions properly
 		for (const symbol of symbolSchema.options) {
-			await c.env.KV.delete(`position:${symbol}`);
+			try {
+				const position = await adapter.getPosition(symbol);
+				if (position) {
+					const options = { type: ExchangeType.ORDERBOOK, orderType: 'market' as const } as const;
+					if (position.isLong) {
+						await adapter.closeLongPosition(symbol, position.size, options);
+					} else if (adapter.closeShortPosition) {
+						await adapter.closeShortPosition(symbol, position.size, options);
+					}
+				}
+			} catch (error) {
+				console.error(`Error closing position for ${symbol}:`, error);
+			}
+		}
+
+		// Then forcefully delete all position data and reset balance
+		for (const symbol of symbolSchema.options) {
+			await c.env.KV.delete(`paper:position:${symbol}`);
 			await c.env.KV.delete(`stats:${symbol}`);
 		}
 
 		// Reset balance to initial value
-		await c.env.KV.put('balance:USDC', JSON.stringify(1000));
+		await c.env.KV.put('paper:balance:USDC', JSON.stringify(TRADING_CONFIG.INITIAL_BALANCE));
 
 		return c.json({
-			message: 'All positions deleted and balance reset',
-			initialBalance: 1000
+			message: 'All paper trading positions closed and balance reset',
+			initialBalance: TRADING_CONFIG.INITIAL_BALANCE
 		});
 	} catch (error) {
-		console.error('Error resetting positions:', error);
+		console.error('Error resetting paper trading positions:', error);
 		return c.json({ error: 'Internal server error' }, 500);
 	}
 });

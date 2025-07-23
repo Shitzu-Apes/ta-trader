@@ -8,8 +8,9 @@ import { cors } from 'hono/cors';
 import { poweredBy } from 'hono/powered-by';
 import type { HTTPResponseError } from 'hono/types';
 
+import { HTTP_CONFIG } from './config';
 import datapoints from './datapoints';
-import { updateIndicators } from './taapi';
+import { updateIndicators, analyzeMarketData } from './taapi';
 import { EnvBindings } from './types';
 
 // eslint-disable-next-line import/no-named-as-default-member
@@ -52,6 +53,17 @@ app.notFound(() => {
 	return new Response(null, { status: 404 });
 });
 
+async function updateIndicatorsAndTrade(env: EnvBindings) {
+	// First update indicators for all symbols
+	await updateIndicators(env);
+
+	// Wait for data to be stored
+	await new Promise((resolve) => setTimeout(resolve, HTTP_CONFIG.INDICATOR_FETCH_DELAY));
+
+	// Then run paper trading analysis only on NEAR/USDT
+	await analyzeMarketData(env, 'NEAR/USDT');
+}
+
 export default {
 	fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		return app.fetch(request, env, ctx);
@@ -59,10 +71,7 @@ export default {
 	async scheduled(controller: ScheduledController, env: EnvBindings, ctx: ExecutionContext) {
 		switch (controller.cron) {
 			case '*/5 * * * *':
-				ctx.waitUntil(updateIndicators(env, 'NEAR/USDT'));
-				// ctx.waitUntil(updateIndicators(env, 'SOL/USDT'));
-				// ctx.waitUntil(updateIndicators(env, 'BTC/USDT'));
-				// ctx.waitUntil(updateIndicators(env, 'ETH/USDT'));
+				ctx.waitUntil(updateIndicatorsAndTrade(env));
 				break;
 		}
 	}

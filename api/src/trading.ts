@@ -1,47 +1,6 @@
-import { FixedNumber } from './FixedNumber';
-import { Ref } from './ref';
+import { ExchangeType, TradingAdapter } from './adapters';
+import { TRADING_CONFIG } from './config';
 import { EnvBindings } from './types';
-
-// Symbol info for token addresses
-const symbolInfo = {
-	'NEAR/USDT': {
-		base: 'wrap.near',
-		quote: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-		poolId: 5515
-	}
-} as const;
-
-// Token decimals info
-const tokenInfo = {
-	'wrap.near': {
-		decimals: 24
-	},
-	'17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': {
-		decimals: 6
-	}
-} as const;
-
-// Trading algorithm configuration
-const TRADING_CONFIG = {
-	STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss threshold
-	TAKE_PROFIT_THRESHOLD: 0.03, // +3% take profit threshold
-	INITIAL_BALANCE: 1000, // Initial USDC balance
-	OBV_WINDOW_SIZE: 12, // 1 hour window for slope calculation
-	SLOPE_THRESHOLD: 0.1, // Minimum slope difference to consider divergence
-
-	// TA score multipliers
-	VWAP_THRESHOLD: 0.01, // 1% threshold for VWAP signals
-	VWAP_MULTIPLIER: 0.5, // Base multiplier for VWAP signals
-	BBANDS_MULTIPLIER: 1.5, // Bollinger Bands score multiplier
-	RSI_MULTIPLIER: 2, // RSI score multiplier
-	OBV_DIVERGENCE_MULTIPLIER: 0.8, // OBV divergence score multiplier
-	PROFIT_SCORE_MULTIPLIER: 0.75, // Profit-taking score multiplier (per 1% in profit)
-	DEPTH_SCORE_MULTIPLIER: 0, // Orderbook depth imbalance score multiplier
-	TIME_DECAY_MULTIPLIER: 0.05, // Score reduction per minute for open positions
-
-	// Partial position thresholds
-	PARTIAL_POSITION_THRESHOLDS: [{ buy: 2, sell: -0.5 }] as const
-} as const;
 
 /**
  * Calculate slope using linear regression
@@ -78,40 +37,6 @@ function calculateSlope(values: number[], windowSize: number): number {
 }
 
 /**
- * Calculate the expected swap outcome
- */
-async function calculateSwapOutcome(
-	symbol: string,
-	amountIn: number,
-	isBuy: boolean,
-	_env: EnvBindings
-): Promise<number> {
-	const tokens = symbolInfo[symbol as keyof typeof symbolInfo];
-	if (!tokens) {
-		throw new Error(`Unsupported symbol: ${symbol}`);
-	}
-
-	// For buys: quote -> base (USDT -> NEAR)
-	// For sells: base -> quote (NEAR -> USDT)
-	const tokenIn = isBuy ? tokens.quote : tokens.base;
-	const tokenOut = isBuy ? tokens.base : tokens.quote;
-	const decimals = tokenInfo[tokenIn as keyof typeof tokenInfo].decimals;
-
-	// Convert amount to FixedNumber with proper decimals
-	const fixedAmount = new FixedNumber(BigInt(Math.floor(amountIn * 10 ** decimals)), decimals);
-
-	// Get expected return from REF
-	const expectedReturn = await Ref.getSmartRouterReturn({
-		tokenIn,
-		amountIn: fixedAmount,
-		tokenOut,
-		decimals: tokenInfo[tokenOut as keyof typeof tokenInfo].decimals
-	});
-
-	return expectedReturn.toNumber();
-}
-
-/**
  * Calculate RSI score between -1 and 1
  * - Negative: Oversold (bullish)
  * - Positive: Overbought (bearish)
@@ -144,45 +69,87 @@ function calculateBBandsScore(currentPrice: number, upperBand: number, lowerBand
  * Returns a score where:
  * - Positive: VWAP above price (bullish)
  * - Negative: VWAP below price (bearish)
- * - Zero: Within threshold
+ * - Zero: Within threshold (±1%)
+ *
+ * Examples with VWAP_THRESHOLD = 0.01 (1%):
+ * - VWAP 0.5% above price: score = 0 (within threshold)
+ * - VWAP 2% above price: score = 1.0 (1% above threshold)
+ * - VWAP 3% above price: score = 2.0 (2% above threshold)
+ * - VWAP 2.5% below price: score = -1.5 (1.5% below threshold)
  */
 function calculateVwapScore(currentPrice: number, vwap: number): number {
 	const vwapDiff = (vwap - currentPrice) / currentPrice;
 
+	// Return 0 if within ±1% threshold
 	if (Math.abs(vwapDiff) <= TRADING_CONFIG.VWAP_THRESHOLD) {
 		return 0;
 	}
 
 	// Calculate how many additional percentage points above threshold
 	const additionalPercentage = Math.abs(vwapDiff) - TRADING_CONFIG.VWAP_THRESHOLD;
-	const score = Math.floor(additionalPercentage / TRADING_CONFIG.VWAP_THRESHOLD);
+	const score = additionalPercentage / TRADING_CONFIG.VWAP_THRESHOLD;
 
+	// Return positive score for bullish (VWAP above price), negative for bearish
 	return vwapDiff > 0 ? score : -score;
+}
+
+/**
+ * Calculate divergence score between price and OBV slopes
+ * Returns a score between -1 and 1:
+ * - Negative: Bearish divergence (price up, OBV down)
+ * - Positive: Bullish divergence (price down, OBV up)
+ * - Magnitude indicates strength of divergence
+ */
+function detectSlopeDivergence(priceSlope: number, obvSlope: number, threshold: number): number {
+	// If slopes are too small, no significant divergence
+	if (Math.abs(priceSlope) < threshold) {
+		return 0;
+	}
+
+	// Calculate how strongly the slopes diverge
+	const divergenceStrength =
+		(priceSlope * -obvSlope) / Math.max(Math.abs(priceSlope), Math.abs(obvSlope));
+
+	// Scale the strength by how much price slope exceeds threshold
+	const scaleFactor = Math.min(Math.abs(priceSlope) / threshold, 1);
+
+	return divergenceStrength * scaleFactor;
 }
 
 /**
  * Calculate OBV score based on divergence
  */
-function calculateObvScore(prices: number[], obvs: number[]): number {
+function calculateObvScore(symbol: string, prices: number[], obvs: number[]): number {
+	// Calculate slopes
 	const priceSlope = calculateSlope(prices, TRADING_CONFIG.OBV_WINDOW_SIZE);
 	const obvSlope = calculateSlope(obvs, TRADING_CONFIG.OBV_WINDOW_SIZE);
 
-	// Divergence occurs when slopes have different signs
-	if (Math.sign(priceSlope) !== Math.sign(obvSlope)) {
-		// Return negative score for bearish divergence (price up, OBV down)
-		// Return positive score for bullish divergence (price down, OBV up)
-		return (
-			Math.sign(obvSlope) *
-			Math.min(Math.abs(priceSlope - obvSlope), TRADING_CONFIG.SLOPE_THRESHOLD)
-		);
-	}
+	// Normalize slopes
+	const maxPrice = Math.max(...prices.slice(-TRADING_CONFIG.OBV_WINDOW_SIZE));
+	const maxObv = Math.max(...obvs.slice(-TRADING_CONFIG.OBV_WINDOW_SIZE));
+	const normalizedPriceSlope = (priceSlope / maxPrice) * 1000;
+	const normalizedObvSlope = (obvSlope / maxObv) * 1000;
 
-	return 0;
+	console.log(
+		`[${symbol}] [trade] OBV analysis:`,
+		`Price slope=${normalizedPriceSlope.toFixed(4)}`,
+		`OBV slope=${normalizedObvSlope.toFixed(4)}`
+	);
+
+	// Calculate divergence score
+	return detectSlopeDivergence(
+		normalizedPriceSlope,
+		normalizedObvSlope,
+		TRADING_CONFIG.SLOPE_THRESHOLD
+	);
 }
 
 /**
  * Calculate profit score based on current position
- * Only returns a score for positive profits
+ * Returns a score that encourages closing profitable positions:
+ * - For longs: negative score when in profit (to encourage closing)
+ * - For shorts: positive score when in profit (to encourage closing)
+ * This way the profit score pushes against the position's direction when profitable
  */
 function calculateProfitScore(position: Position, currentPrice: number): number {
 	if (!position || position.partials.length === 0) return 0;
@@ -198,19 +165,13 @@ function calculateProfitScore(position: Position, currentPrice: number): number 
 	// Calculate profit percentage
 	const profitPct = (currentPrice - avgEntryPrice) / avgEntryPrice;
 
-	// Only return score if profit is positive
-	return profitPct > 0 ? profitPct : 0;
-}
-
-/**
- * Calculate depth score based on order book imbalance
- */
-function calculateDepthScore(bidSize: number, askSize: number): number {
-	const totalSize = bidSize + askSize;
-	if (totalSize === 0) return 0;
-
-	// Calculate bid/ask imbalance (-1 to 1)
-	return (bidSize - askSize) / totalSize;
+	// For longs: return negative score when profitable (to encourage closing)
+	// For shorts: return positive score when profitable (to encourage closing)
+	if (position.isLong) {
+		return profitPct > 0 ? -profitPct : 0;
+	} else {
+		return profitPct < 0 ? -profitPct : 0;
+	}
 }
 
 /**
@@ -228,6 +189,7 @@ function calculateTimeDecayScore(openedAt: number): number {
  * For no position, returns a single score
  */
 function calculateTaScores(
+	symbol: string,
 	position: Position | null,
 	currentPrice: number,
 	vwap: number,
@@ -235,27 +197,23 @@ function calculateTaScores(
 	bbandsLower: number,
 	rsi: number,
 	prices: number[],
-	obvs: number[],
-	bidSize: number,
-	askSize: number
+	obvs: number[]
 ): number[] {
 	// Calculate base scores
 	const vwapScore = calculateVwapScore(currentPrice, vwap);
 	const bbandsScore = calculateBBandsScore(currentPrice, bbandsUpper, bbandsLower);
 	const rsiScore = calculateRsiScore(rsi);
-	const obvScore = calculateObvScore(prices, obvs);
+	const obvScore = calculateObvScore(symbol, prices, obvs);
 	const profitScore = position ? calculateProfitScore(position, currentPrice) : 0;
-	const depthScore = calculateDepthScore(bidSize, askSize);
 
 	// Log individual scores
 	console.log(
-		'[trade] Individual scores:',
+		`[${symbol}] [trade] Individual scores:`,
 		`VWAP=${(vwapScore * TRADING_CONFIG.VWAP_MULTIPLIER).toFixed(4)}`,
 		`BBands=${(bbandsScore * TRADING_CONFIG.BBANDS_MULTIPLIER).toFixed(4)}`,
 		`RSI=${(rsiScore * TRADING_CONFIG.RSI_MULTIPLIER).toFixed(4)}`,
 		`OBV=${(obvScore * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER).toFixed(4)}`,
-		`Profit=${(profitScore * TRADING_CONFIG.PROFIT_SCORE_MULTIPLIER).toFixed(4)}`,
-		`Depth=${(depthScore * TRADING_CONFIG.DEPTH_SCORE_MULTIPLIER).toFixed(4)}`
+		`Profit=${(profitScore * TRADING_CONFIG.PROFIT_SCORE_MULTIPLIER).toFixed(4)}`
 	);
 
 	// For each partial position (or just once for new position)
@@ -268,8 +226,7 @@ function calculateTaScores(
 			bbandsScore * TRADING_CONFIG.BBANDS_MULTIPLIER +
 			rsiScore * TRADING_CONFIG.RSI_MULTIPLIER +
 			obvScore * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER +
-			profitScore * TRADING_CONFIG.PROFIT_SCORE_MULTIPLIER +
-			depthScore * TRADING_CONFIG.DEPTH_SCORE_MULTIPLIER;
+			profitScore * TRADING_CONFIG.PROFIT_SCORE_MULTIPLIER;
 
 		// Add time decay score for existing positions
 		if (position && position.partials[i]) {
@@ -293,6 +250,7 @@ export type PartialPosition = {
 export type Position = {
 	symbol: string;
 	size: number; // Total position size (sum of partial positions)
+	isLong: boolean; // Whether this is a long position
 	lastUpdateTime: number;
 	cumulativePnl: number;
 	successfulTrades: number;
@@ -300,24 +258,13 @@ export type Position = {
 	partials: PartialPosition[]; // Array of partial positions
 };
 
-// Get the current USDC balance
-async function getBalance(env: EnvBindings): Promise<number> {
-	const balance = await env.KV.get<number>('balance:USDC', 'json');
-	return balance ?? TRADING_CONFIG.INITIAL_BALANCE;
-}
-
-// Update the USDC balance
-async function updateBalance(env: EnvBindings, balance: number): Promise<void> {
-	await env.KV.put('balance:USDC', JSON.stringify(balance));
-}
-
 export async function getPosition(env: EnvBindings, symbol: string): Promise<Position | null> {
-	const key = `position:${symbol}`;
+	const key = `paper:position:${symbol}`;
 	return env.KV.get<Position>(key, 'json');
 }
 
 export async function updatePosition(env: EnvBindings, position: Position): Promise<void> {
-	const key = `position:${position.symbol}`;
+	const key = `paper:position:${position.symbol}`;
 	await env.KV.put(key, JSON.stringify(position));
 }
 
@@ -333,107 +280,101 @@ function calculateAverageEntryPrice(partials: PartialPosition[]): number {
 }
 
 export async function closePosition(
+	adapter: TradingAdapter,
 	env: EnvBindings,
 	symbol: string,
-	expectedUsdcAmount: number
+	size: number
 ): Promise<void> {
-	const key = `position:${symbol}`;
-	const position = await getPosition(env, symbol);
-
-	if (position) {
-		const avgEntryPrice = calculateAverageEntryPrice(position.partials);
-		const closingPnl = expectedUsdcAmount - position.size * avgEntryPrice;
-		position.cumulativePnl += closingPnl;
-		position.totalTrades += 1;
-		if (closingPnl > 0) {
-			position.successfulTrades += 1;
-		}
-
-		// Update USDC balance
-		const currentBalance = await getBalance(env);
-		const newBalance = currentBalance + expectedUsdcAmount;
-
-		console.log(
-			`[${symbol}] [trade] Closing balance update:`,
-			`Current=${currentBalance}`,
-			`Expected USDC=${expectedUsdcAmount}`,
-			`New=${newBalance}`
-		);
-
-		await updateBalance(env, newBalance);
-
-		// Store the final state before deleting
-		const statsKey = `stats:${symbol}`;
-		await env.KV.put(
-			statsKey,
-			JSON.stringify({
-				cumulativePnl: position.cumulativePnl,
-				successfulTrades: position.successfulTrades,
-				totalTrades: position.totalTrades
-			})
-		);
-	}
-
-	await env.KV.delete(key);
-}
-
-// Update position with current market data
-export async function updatePositionPnL(env: EnvBindings, symbol: string): Promise<void> {
 	const position = await getPosition(env, symbol);
 	if (!position) return;
 
-	// Calculate expected USDC amount from the swap
-	const expectedUsdcAmount = await calculateSwapOutcome(symbol, position.size, false, env);
-	const avgEntryPrice = calculateAverageEntryPrice(position.partials);
-	const unrealizedPnl = expectedUsdcAmount - position.size * avgEntryPrice;
+	const exchangeType = adapter.getExchangeType();
+	const options =
+		exchangeType === ExchangeType.AMM
+			? ({
+					type: ExchangeType.AMM,
+					maxPriceImpact: 0.05
+				} as const)
+			: ({
+					type: ExchangeType.ORDERBOOK,
+					orderType: 'market' as const
+				} as const);
 
-	console.log(
-		`[${symbol}] [trade] Unrealized PnL: ${unrealizedPnl} USDC`,
-		`Expected USDC: ${expectedUsdcAmount}`
-	);
-
-	position.lastUpdateTime = Date.now();
-	await updatePosition(env, position);
+	// Close position using adapter
+	if (position.isLong) {
+		await adapter.closeLongPosition(symbol, size, options);
+	} else {
+		if (!adapter.closeShortPosition) {
+			throw new Error('Adapter does not support short positions');
+		}
+		await adapter.closeShortPosition(symbol, size, options);
+	}
 }
 
 /**
- * Calculate actual price from swap amounts using FixedNumber
+ * Get actual price from the adapter based on position size
+ * Uses a default amount of 100 USDC if balance is zero
  */
-function calculateActualPrice(symbol: string, baseAmount: number, quoteAmount: number): number {
-	const tokens = symbolInfo[symbol as keyof typeof symbolInfo];
-	if (!tokens) {
-		throw new Error(`Unsupported symbol: ${symbol}`);
+async function getActualPrice(adapter: TradingAdapter, symbol: string): Promise<number> {
+	const balance = await adapter.getBalance();
+	const amountToUse = balance <= 0 ? 100 : balance;
+
+	const nextPositionSize = calculateNextPositionSize(amountToUse, 0);
+	const exchangeType = adapter.getExchangeType();
+	const options =
+		exchangeType === ExchangeType.AMM
+			? ({
+					type: ExchangeType.AMM,
+					maxPriceImpact: 0.05
+				} as const)
+			: ({
+					type: ExchangeType.ORDERBOOK,
+					orderType: 'market' as const
+				} as const);
+
+	const result = await adapter.getExpectedTradeReturn(
+		symbol,
+		nextPositionSize,
+		true,
+		true,
+		options
+	);
+
+	// Use adapter's price method if available, otherwise calculate from the trade
+	try {
+		return await adapter.getPrice(symbol, nextPositionSize);
+	} catch {
+		return nextPositionSize / result.expectedSize;
 	}
-
-	const baseDecimals = tokenInfo[tokens.base as keyof typeof tokenInfo].decimals;
-	const quoteDecimals = tokenInfo[tokens.quote as keyof typeof tokenInfo].decimals;
-
-	const fixedBase = new FixedNumber(
-		BigInt(Math.floor(baseAmount * 10 ** baseDecimals)),
-		baseDecimals
-	);
-	const fixedQuote = new FixedNumber(
-		BigInt(Math.floor(quoteAmount * 10 ** quoteDecimals)),
-		quoteDecimals
-	);
-
-	// Price = quote/base (USDT/NEAR)
-	return fixedQuote.div(fixedBase).toNumber();
 }
 
-// Helper function to get thresholds based on partial positions
+// Helper function to get thresholds based on partial positions and position type
 function getThresholds(
 	position: Position | null,
-	partialIndex?: number
+	partialIndex?: number,
+	isLong?: boolean
 ): { buy: number; sell: number } {
 	// For new positions or specific partial index, use that index
 	const index = partialIndex ?? position?.partials.length ?? 0;
 
 	// If index exists in thresholds, use it, otherwise use first threshold
-	return (
+	const thresholds =
 		TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS[index] ??
-		TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS[0]
-	);
+		TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS[0];
+
+	// For existing positions, use their direction
+	// For new positions, use the provided direction or default to long
+	const useThresholds = position
+		? position.isLong
+			? thresholds.long
+			: thresholds.short
+		: isLong === undefined
+			? thresholds.long
+			: isLong
+				? thresholds.long
+				: thresholds.short;
+
+	return useThresholds;
 }
 
 // Helper function to calculate next position size
@@ -503,6 +444,7 @@ function shouldClosePartial(
  * Analyze market data and decide trading action
  */
 export async function analyzeForecast(
+	adapter: TradingAdapter,
 	env: EnvBindings,
 	symbol: string,
 	currentPrice: number,
@@ -511,16 +453,14 @@ export async function analyzeForecast(
 	bbandsLower: number,
 	rsi: number,
 	prices: number[],
-	obvs: number[],
-	bidSize: number,
-	askSize: number
+	obvs: number[]
 ): Promise<void> {
 	// Get current position if it exists
 	const currentPosition = await getPosition(env, symbol);
 	const partialCount = currentPosition?.partials.length ?? 0;
 
-	// Get actual price from REF
-	const actualPrice = await getActualPrice(symbol, env);
+	// Get actual price from adapter
+	const actualPrice = await getActualPrice(adapter, symbol);
 	if (!actualPrice) {
 		console.log(`[${symbol}] [trade] Failed to get actual price`);
 		return;
@@ -533,6 +473,7 @@ export async function analyzeForecast(
 
 	// Calculate technical analysis scores
 	const taScores = calculateTaScores(
+		symbol,
 		currentPosition,
 		actualPrice,
 		vwap,
@@ -540,9 +481,7 @@ export async function analyzeForecast(
 		bbandsLower,
 		rsi,
 		prices,
-		obvs,
-		bidSize,
-		askSize
+		obvs
 	);
 
 	// Calculate total scores for each partial position
@@ -586,24 +525,45 @@ export async function analyzeForecast(
 			);
 
 			// Calculate expected USDC amount for the closing size
-			const closeUsdcAmount = await calculateSwapOutcome(symbol, sizeToClose, false, env);
+			const exchangeType = adapter.getExchangeType();
+			const options =
+				exchangeType === ExchangeType.AMM
+					? ({
+							type: ExchangeType.AMM,
+							maxPriceImpact: 0.05
+						} as const)
+					: ({
+							type: ExchangeType.ORDERBOOK,
+							orderType: 'market' as const
+						} as const);
+
+			const result = await adapter.getExpectedTradeReturn(
+				symbol,
+				sizeToClose,
+				position.isLong,
+				false,
+				options
+			);
 
 			// Calculate PnL for closing partials
 			const closingPnl = partialsToClose.reduce((sum, index) => {
 				const partial = position.partials[index];
-				const partialValue = (closeUsdcAmount * partial.size) / sizeToClose;
-				return sum + (partialValue - partial.size * partial.entryPrice);
+				const partialValue = (result.expectedSize * partial.size) / sizeToClose;
+				const pnl = position.isLong
+					? partialValue - partial.size * partial.entryPrice
+					: partial.size * partial.entryPrice - partialValue;
+				return sum + pnl;
 			}, 0);
 
 			console.log(
 				`[${symbol}] [trade] Closing PnL: ${closingPnl} USDC`,
 				`Size=${sizeToClose}`,
-				`Expected USDC=${closeUsdcAmount}`
+				`Expected USDC=${result.expectedSize}`
 			);
 
 			// If closing all positions
 			if (partialsToClose.length === position.partials.length) {
-				await closePosition(env, symbol, closeUsdcAmount);
+				await closePosition(adapter, env, symbol, sizeToClose);
 				return;
 			}
 
@@ -624,16 +584,35 @@ export async function analyzeForecast(
 			};
 
 			// Update USDC balance
-			const currentBalance = await getBalance(env);
-			const newBalance = currentBalance + closeUsdcAmount;
-			await updateBalance(env, newBalance);
-
+			// Balance update is now handled by the adapter's close position methods
 			await updatePosition(env, updatedPosition);
+
+			const marketInfo = await adapter.getMarketInfo(symbol);
+			console.log(
+				`[${symbol}] [trade] Position update:`,
+				`Added=${sizeToClose} ${marketInfo.baseToken}`,
+				`Value=${sizeToClose * actualPrice} USDC`,
+				`Remaining Balance=${await adapter.getBalance()} USDC`
+			);
 		}
 	}
 
 	// Check if we should open a new position or add a partial
-	if (totalScores[0] > thresholds.buy) {
+	if (Math.abs(totalScores[0]) > thresholds.buy) {
+		// Determine if we should go long or short based on score sign
+		const goLong = totalScores[0] > 0;
+
+		// Get correct thresholds for the direction
+		const directionThresholds = getThresholds(null, 0, goLong);
+
+		// Verify the score exceeds the directional threshold
+		if (Math.abs(totalScores[0]) <= Math.abs(directionThresholds.buy)) {
+			console.log(
+				`[${symbol}] [trade] Score ${totalScores[0]} does not exceed ${directionThresholds.buy} threshold for ${goLong ? 'long' : 'short'}`
+			);
+			return;
+		}
+
 		// Check if we can add more partial positions
 		if (partialCount >= TRADING_CONFIG.PARTIAL_POSITION_THRESHOLDS.length) {
 			console.log(
@@ -643,7 +622,7 @@ export async function analyzeForecast(
 		}
 
 		// Opening logic for new position or additional partial
-		const balance = await getBalance(env);
+		const balance = await adapter.getBalance();
 		if (balance <= 0) {
 			console.log(`[${symbol}] [trade] Insufficient balance: ${balance} USDC`);
 			return;
@@ -656,10 +635,34 @@ export async function analyzeForecast(
 			return;
 		}
 
-		const expectedNearAmount = await calculateSwapOutcome(symbol, nextPositionSize, true, env);
-		const size = expectedNearAmount;
+		const exchangeType = adapter.getExchangeType();
+		const options =
+			exchangeType === ExchangeType.AMM
+				? ({
+						type: ExchangeType.AMM,
+						maxPriceImpact: 0.05
+					} as const)
+				: ({
+						type: ExchangeType.ORDERBOOK,
+						orderType: 'market' as const
+					} as const);
+
+		const result = await adapter.getExpectedTradeReturn(
+			symbol,
+			nextPositionSize,
+			goLong,
+			true,
+			options
+		);
+		const size = result.expectedSize;
 
 		if (currentPosition) {
+			// Only add to position if same direction
+			if (currentPosition.isLong !== goLong) {
+				console.log(`[${symbol}] [trade] Cannot add to position: opposite direction`);
+				return;
+			}
+
 			// Add a new partial to existing position
 			console.log(`[${symbol}] [trade] Opening additional partial position #${partialCount + 1}`);
 			const newPartial: PartialPosition = {
@@ -675,18 +678,16 @@ export async function analyzeForecast(
 				partials: [...currentPosition.partials, newPartial]
 			};
 
+			// Update USDC balance
+			// Balance update is now handled by the adapter's close position methods
 			await updatePosition(env, updatedPosition);
 
-			// Update USDC balance
-			const newBalance = balance - nextPositionSize;
-			await updateBalance(env, newBalance);
-
+			const marketInfo = await adapter.getMarketInfo(symbol);
 			console.log(
 				`[${symbol}] [trade] Position update:`,
-				`Added=${size} ${symbolInfo[symbol as keyof typeof symbolInfo].base}`,
+				`Added=${size} ${marketInfo.baseToken}`,
 				`Value=${size * actualPrice} USDC`,
-				`Remaining Balance=${newBalance} USDC`,
-				`Total Partials=${updatedPosition.partials.length}`
+				`Remaining Balance=${await adapter.getBalance()} USDC`
 			);
 		} else {
 			// Get previous trading stats
@@ -698,7 +699,7 @@ export async function analyzeForecast(
 			}>(statsKey, 'json');
 
 			// Open new position with first partial
-			console.log(`[${symbol}] [trade] Opening first partial position`);
+			console.log(`[${symbol}] [trade] Opening first ${goLong ? 'long' : 'short'} position`);
 			const firstPartial: PartialPosition = {
 				size,
 				entryPrice: actualPrice,
@@ -708,6 +709,7 @@ export async function analyzeForecast(
 			const newPosition: Position = {
 				symbol,
 				size,
+				isLong: goLong,
 				lastUpdateTime: Date.now(),
 				cumulativePnl: stats?.cumulativePnl ?? 0,
 				successfulTrades: stats?.successfulTrades ?? 0,
@@ -715,17 +717,16 @@ export async function analyzeForecast(
 				partials: [firstPartial]
 			};
 
+			// Update USDC balance
+			// Balance update is now handled by the adapter's close position methods
 			await updatePosition(env, newPosition);
 
-			// Update USDC balance
-			const newBalance = balance - nextPositionSize;
-			await updateBalance(env, newBalance);
-
+			const marketInfo = await adapter.getMarketInfo(symbol);
 			console.log(
 				`[${symbol}] [trade] Position update:`,
-				`Added=${size} ${symbolInfo[symbol as keyof typeof symbolInfo].base}`,
+				`Added=${size} ${marketInfo.baseToken}`,
 				`Value=${size * actualPrice} USDC`,
-				`Remaining Balance=${newBalance} USDC`
+				`Remaining Balance=${await adapter.getBalance()} USDC`
 			);
 		}
 		return;
@@ -752,15 +753,37 @@ export async function analyzeForecast(
 	}
 }
 
-/**
- * Get actual price from REF based on position size
- * Uses a default amount of 100 USDC if balance is zero
- */
-async function getActualPrice(symbol: string, env: EnvBindings): Promise<number | null> {
-	const balance = await getBalance(env);
-	const amountToUse = balance <= 0 ? 100 : balance;
+// Update position with current market data
+export async function updatePositionPnL(
+	adapter: TradingAdapter,
+	env: EnvBindings,
+	symbol: string
+): Promise<void> {
+	const position = await getPosition(env, symbol);
+	if (!position) return;
 
-	const nextPositionSize = calculateNextPositionSize(amountToUse, 0);
-	const expectedNearAmount = await calculateSwapOutcome(symbol, nextPositionSize, true, env);
-	return calculateActualPrice(symbol, expectedNearAmount, nextPositionSize);
+	// Calculate expected USDC amount from the swap
+	const exchangeType = adapter.getExchangeType();
+	const options =
+		exchangeType === ExchangeType.AMM
+			? ({
+					type: ExchangeType.AMM,
+					maxPriceImpact: 0.05
+				} as const)
+			: ({
+					type: ExchangeType.ORDERBOOK,
+					orderType: 'market' as const
+				} as const);
+
+	const result = await adapter.getExpectedTradeReturn(symbol, position.size, true, false, options);
+	const avgEntryPrice = calculateAverageEntryPrice(position.partials);
+	const unrealizedPnl = result.expectedSize - position.size * avgEntryPrice;
+
+	console.log(
+		`[${symbol}] [trade] Unrealized PnL: ${unrealizedPnl} USDC`,
+		`Expected USDC: ${result.expectedSize}`
+	);
+
+	position.lastUpdateTime = Date.now();
+	await updatePosition(env, position);
 }
