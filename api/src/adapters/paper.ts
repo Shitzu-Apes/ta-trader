@@ -246,17 +246,31 @@ export class PaperTradingAdapter implements TradingAdapter {
 		// Update balance
 		await this.updateBalance(balance - totalRequired);
 
-		// Create position (shorts are always new positions)
-		const newPosition: PaperPosition = {
-			symbol,
-			size: -baseTokenAmount, // Negative size indicates short position
-			entryPrice: this.getCurrentPrice(),
-			timestamp: Date.now(),
-			isLong: false,
-			leverage,
-			margin: requiredMargin,
-			fundingPaid: 0
-		};
+		// Create or update position (similar to longs)
+		const existingPosition = await this.getPaperPosition(symbol);
+		const newPosition: PaperPosition =
+			existingPosition && !existingPosition.isLong
+				? {
+						...existingPosition,
+						size: existingPosition.size - baseTokenAmount, // More negative for larger short
+						entryPrice:
+							(existingPosition.entryPrice * Math.abs(existingPosition.size) +
+								this.getCurrentPrice() * baseTokenAmount) /
+							(Math.abs(existingPosition.size) + baseTokenAmount),
+						margin: existingPosition.margin + requiredMargin,
+						timestamp: Date.now(),
+						fundingPaid: existingPosition.fundingPaid
+					}
+				: {
+						symbol,
+						size: -baseTokenAmount, // Negative size indicates short position
+						entryPrice: this.getCurrentPrice(),
+						timestamp: Date.now(),
+						isLong: false,
+						leverage,
+						margin: requiredMargin,
+						fundingPaid: 0
+					};
 
 		await this.updatePaperPosition(newPosition, symbol);
 
@@ -393,7 +407,6 @@ export class PaperTradingAdapter implements TradingAdapter {
 			throw new Error('Invalid options type for paper trading');
 		}
 
-		const leverage = options.leverage ?? 1;
 		let positionValue;
 		let expectedSize;
 
@@ -404,21 +417,16 @@ export class PaperTradingAdapter implements TradingAdapter {
 		} else {
 			// For closing positions, size is in base token
 			positionValue = size * this.getCurrentPrice();
-			expectedSize = size;
+			expectedSize = positionValue; // Return USDC value from selling the tokens
 		}
 
 		const fee = positionValue * PAPER_CONFIG.DEFAULT_FEE;
-		let margin = 0;
-		if (isOpen) {
-			margin = (positionValue * PAPER_CONFIG.INITIAL_MARGIN) / leverage;
-		}
 
 		return {
 			type: ExchangeType.ORDERBOOK as const,
 			expectedPrice: this.getCurrentPrice(),
 			expectedSize,
-			fee,
-			margin
+			fee
 		};
 	}
 

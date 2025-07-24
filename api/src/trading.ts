@@ -232,7 +232,9 @@ function calculateTaScores(
 		if (position && position.partials[i]) {
 			const timeDecayScore = calculateTimeDecayScore(position.partials[i].openedAt);
 			total += timeDecayScore;
-			console.log(`[trade] Time decay score for partial #${i + 1}: ${timeDecayScore.toFixed(4)}`);
+			console.log(
+				`[${symbol}] [trade] Time decay score for partial #${i + 1}: ${timeDecayScore.toFixed(4)}`
+			);
 		}
 
 		scores.push(total);
@@ -748,8 +750,6 @@ export async function analyzeForecast(
 				`Age=${Math.floor((Date.now() - partial.openedAt) / (1000 * 60))}min`
 			);
 		});
-	} else {
-		console.log(`[${symbol}] [trade] No position to hold`);
 	}
 }
 
