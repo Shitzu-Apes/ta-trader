@@ -3,6 +3,7 @@ import { TRADING_CONFIG } from '../config';
 import { Position } from '../trading';
 import { EnvBindings } from '../types';
 
+import { OrderlyAdapter } from './orderly';
 import { PaperTradingAdapter } from './paper';
 import { RefFinanceAdapter } from './ref';
 
@@ -21,7 +22,7 @@ export enum ExchangeType {
 /**
  * Supported adapter implementations
  */
-export type AdapterType = 'ref' | 'paper';
+export type AdapterType = 'ref' | 'paper' | 'orderly';
 
 /**
  * Base market information shared by all exchange types
@@ -462,13 +463,22 @@ export type { FixedNumber };
  * const refAdapter = getAdapter(env, 'ref');
  * ```
  */
-export function getAdapter(env: EnvBindings, adapterOverride?: AdapterType): TradingAdapter {
+export function getAdapter(
+	env: EnvBindings,
+	adapterOverride?: AdapterType,
+	orderlyPrivateKey?: Uint8Array | string
+): TradingAdapter {
 	const adapterType = adapterOverride ?? TRADING_CONFIG.ADAPTER;
 	switch (adapterType) {
 		case 'ref':
 			return new RefFinanceAdapter(env);
 		case 'paper':
 			return new PaperTradingAdapter(env);
+		case 'orderly':
+			if (!orderlyPrivateKey) {
+				throw new Error('Orderly adapter requires a private key');
+			}
+			return new OrderlyAdapter(env, orderlyPrivateKey);
 		default:
 			throw new Error(`Unknown adapter type: ${adapterType}`);
 	}
