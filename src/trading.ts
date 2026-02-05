@@ -151,6 +151,7 @@ export type Position = {
 	isLong: boolean;
 	lastUpdateTime: number;
 	entryPrice: number;
+	markPrice?: number;
 	unrealizedPnl: number;
 	realizedPnl: number;
 };

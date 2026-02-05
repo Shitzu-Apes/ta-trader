@@ -4,35 +4,57 @@
  * TA Trader API Status Checker
  *
  * Fetches and displays positions, balance, portfolio, and other data from the TA Trader API
+ * Also integrates with Orderly Indexer API for trade events and historical data
  *
  * Usage:
  *   node scripts/check-status.js [env=testnet|production] [command]
  *
  * Commands:
- *   all          - Show everything (default)
- *   balance      - Show USDC balance only
- *   positions    - Show all positions
- *   portfolio    - Show portfolio summary
- *   position <symbol> - Show specific position (e.g., PERP_NEAR_USDC)
- *   price <symbol>    - Show current price for symbol
- *   indicators <symbol> - Show latest indicators for symbol
+ *   all                    - Show everything (default)
+ *   balance                - Show USDC balance only
+ *   positions              - Show all positions
+ *   portfolio              - Show portfolio summary
+ *   position <symbol>      - Show specific position (e.g., PERP_NEAR_USDC)
+ *   price <symbol>         - Show current price for symbol
+ *   indicators <symbol>    - Show latest indicators for symbol
  *   history <symbol> [indicator] [limit] - Show historical data
- *   logs [limit] - Show recent logs
- *   health       - Quick health check
+ *   logs [limit]           - Show recent logs
+ *   health                 - Quick health check
+ *   trades [limit]         - Show recent trades from Orderly Indexer
+ *   events [type] [limit]  - Show account events (PERPTRADE, SETTLEMENT, etc.)
+ *   funding                - Show funding payments
+ *   volume                 - Show trading volume statistics
  *
  * Examples:
  *   node scripts/check-status.js
  *   node scripts/check-status.js testnet positions
  *   node scripts/check-status.js production balance
- *   node scripts/check-status.js testnet position PERP_NEAR_USDC
- *   node scripts/check-status.js testnet indicators PERP_BTC_USDC
- *   node scripts/check-status.js testnet history PERP_NEAR_USDC rsi 20
+ *   node scripts/check-status.js testnet trades 20
+ *   node scripts/check-status.js testnet events PERPTRADE 10
  */
+
+import { config } from 'dotenv';
+
+// Load environment variables from .env file
+config();
 
 const ENV_URLS = {
 	testnet: 'https://ta-trader-api-testnet.shrm.workers.dev',
 	production: 'https://ta-trader-api.shrm.workers.dev'
 };
+
+const INDEXER_URLS = {
+	testnet: 'https://dev-orderly-dashboard-query-service.orderly.network',
+	production: 'https://orderly-dashboard-query-service.orderly.network'
+};
+
+// Get account ID from environment or use default
+function getAccountId() {
+	return (
+		process.env.ORDERLY_ACCOUNT_ID ||
+		'0x66079dcb0045e2b765a68cec1f39baed69c934df32b069144a75d45c8f597463'
+	);
+}
 
 // Parse command line arguments
 function parseArgs() {
@@ -76,6 +98,33 @@ async function fetchAPI(env, endpoint) {
 	}
 }
 
+// Make Indexer API request
+async function fetchIndexer(env, endpoint, body = null) {
+	const baseUrl = INDEXER_URLS[env];
+	const url = `${baseUrl}${endpoint}`;
+
+	try {
+		const options = {
+			method: body ? 'POST' : 'GET',
+			headers: {
+				'Content-Type': 'application/json'
+			}
+		};
+		if (body) {
+			options.body = JSON.stringify(body);
+		}
+
+		const response = await fetch(url, options);
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+		}
+		return await response.json();
+	} catch (error) {
+		console.error(`Error fetching ${url}:`, error.message);
+		return null;
+	}
+}
+
 // Format number with commas and decimals
 function formatNumber(num, decimals = 2) {
 	if (num === undefined || num === null) return 'N/A';
@@ -95,7 +144,9 @@ function formatCurrency(num) {
 // Format timestamp
 function formatTimestamp(timestamp) {
 	if (!timestamp) return 'N/A';
-	const date = new Date(timestamp);
+	// Handle both milliseconds and seconds
+	const ts = timestamp > 1000000000000 ? timestamp : timestamp * 1000;
+	const date = new Date(ts);
 	return date.toLocaleString();
 }
 
@@ -131,7 +182,7 @@ async function showPositions(env) {
 
 	// Header
 	console.log(
-		`${'Symbol'.padEnd(18)} ${'Side'.padEnd(8)} ${'Size'.padEnd(15)} ${'Entry Price'.padEnd(15)} ${'Unrealized PnL'.padEnd(18)} ${'Realized PnL'.padEnd(15)}`
+		`${'Symbol'.padEnd(18)} ${'Side'.padEnd(8)} ${'Size'.padEnd(12)} ${'Entry'.padEnd(12)} ${'Mark'.padEnd(12)} ${'Unrealized PnL'.padEnd(16)} ${'Realized PnL'.padEnd(15)}`
 	);
 	console.log('─'.repeat(100));
 
@@ -140,13 +191,15 @@ async function showPositions(env) {
 		const side = pos.isLong ? '🟢 LONG' : '🔴 SHORT';
 		const unrealizedPnL = pos.unrealizedPnl || 0;
 		const realizedPnL = pos.realizedPnl || 0;
+		const markPrice = pos.markPrice || pos.entryPrice;
 
 		console.log(
 			`${pos.symbol.padEnd(18)} ` +
 				`${side.padEnd(8)} ` +
-				`${formatNumber(pos.size, 6).padEnd(15)} ` +
-				`${formatCurrency(pos.entryPrice).padEnd(15)} ` +
-				`${formatCurrency(unrealizedPnL).padEnd(18)} ` +
+				`${formatNumber(pos.size, 4).padEnd(12)} ` +
+				`${formatCurrency(pos.entryPrice).padEnd(12)} ` +
+				`${formatCurrency(markPrice).padEnd(12)} ` +
+				`${formatCurrency(unrealizedPnL).padEnd(16)} ` +
 				`${formatCurrency(realizedPnL).padEnd(15)}`
 		);
 	}
@@ -176,9 +229,11 @@ async function showPosition(env, symbol) {
 	}
 
 	const side = data.isLong ? '🟢 LONG' : '🔴 SHORT';
+	const markPrice = data.markPrice || data.entryPrice;
 	console.log(`Side:           ${side}`);
 	console.log(`Size:           ${formatNumber(data.size, 6)}`);
 	console.log(`Entry Price:    ${formatCurrency(data.entryPrice)}`);
+	console.log(`Mark Price:     ${formatCurrency(markPrice)}`);
 	console.log(`Unrealized PnL: ${formatCurrency(data.unrealizedPnl)}`);
 	console.log(`Realized PnL:   ${formatCurrency(data.realizedPnl)}`);
 	console.log(`Last Updated:   ${formatTimestamp(data.lastUpdateTime)}`);
@@ -361,6 +416,212 @@ async function showLogs(env, limit = 20) {
 	}
 }
 
+// Display recent trades from Orderly Indexer
+async function showTrades(env, limit = 10) {
+	console.log(`\n💹 RECENT TRADES (last ${limit})`);
+	console.log('═'.repeat(100));
+
+	const accountId = getAccountId();
+	console.log(`Account ID: ${accountId}\n`);
+
+	const toTime = Math.floor(Date.now() / 1000);
+	const fromTime = toTime - 7 * 24 * 60 * 60; // 7 days ago
+
+	const data = await fetchIndexer(env, '/events_v2', {
+		account_id: accountId,
+		event_type: 'PERPTRADE',
+		from_time: fromTime,
+		to_time: toTime
+	});
+
+	if (!data || !data.success) {
+		console.log('❌ Failed to fetch trades:', data?.message || 'Unknown error');
+		return;
+	}
+
+	if (!data.data || !data.data.events || data.data.events.length === 0) {
+		console.log('No trades found in the last 7 days');
+		return;
+	}
+
+	// Collect all trades from events
+	const allTrades = [];
+	for (const event of data.data.events) {
+		if (event.data?.ProcessedTrades?.trades) {
+			for (const trade of event.data.ProcessedTrades.trades) {
+				allTrades.push({
+					...trade,
+					block_timestamp: event.block_timestamp
+				});
+			}
+		}
+	}
+
+	if (allTrades.length === 0) {
+		console.log('No individual trades found in the last 7 days');
+		return;
+	}
+
+	// Sort by timestamp descending (most recent first)
+	allTrades.sort((a, b) => b.timestamp - a.timestamp);
+
+	console.log(
+		`Found ${allTrades.length} total trades (showing latest ${Math.min(limit, allTrades.length)})\n`
+	);
+
+	// Header
+	console.log(
+		`${'Time'.padEnd(20)} ${'Symbol'.padEnd(18)} ${'Side'.padEnd(6)} ${'Qty'.padEnd(12)} ${'Price'.padEnd(15)} ${'Fee'.padEnd(12)}`
+	);
+	console.log('─'.repeat(100));
+
+	// Display trades (latest first)
+	for (let i = 0; i < Math.min(limit, allTrades.length); i++) {
+		const trade = allTrades[i];
+		const timestamp = formatTimestamp(trade.timestamp);
+		const symbol = trade.symbol_hash?.substring(0, 16) || 'Unknown';
+		const side = trade.side || '-';
+		const qty = formatNumber(parseFloat(trade.trade_qty), 6);
+		const price = formatCurrency(parseFloat(trade.executed_price));
+		const fee = formatNumber(parseFloat(trade.fee), 6);
+
+		console.log(
+			`${timestamp.padEnd(20)} ${symbol.padEnd(18)} ${side.padEnd(6)} ${qty.padEnd(12)} ${price.padEnd(15)} ${fee.padEnd(12)}`
+		);
+	}
+
+	if (data.data.trading_event_next_cursor) {
+		console.log('\n⚠️  More trades available (use pagination)');
+	}
+}
+
+// Display account events
+async function showEvents(env, eventType = null, limit = 20) {
+	const eventTypeDisplay = eventType || 'ALL';
+	console.log(`\n📋 ACCOUNT EVENTS (${eventTypeDisplay})`);
+	console.log('═'.repeat(100));
+
+	const accountId = getAccountId();
+	console.log(`Account ID: ${accountId}\n`);
+
+	const toTime = Math.floor(Date.now() / 1000);
+	const fromTime = toTime - 30 * 24 * 60 * 60; // 30 days ago
+
+	const body = {
+		account_id: accountId,
+		from_time: fromTime,
+		to_time: toTime
+	};
+
+	if (eventType) {
+		body.event_type = eventType;
+	}
+
+	const data = await fetchIndexer(env, '/events_v2', body);
+
+	if (!data || !data.success) {
+		console.log('❌ Failed to fetch events:', data?.message || 'Unknown error');
+		return;
+	}
+
+	if (!data.data || !data.data.events || data.data.events.length === 0) {
+		console.log('No events found in the last 30 days');
+		return;
+	}
+
+	console.log(`Found ${data.data.events.length} events\n`);
+
+	// Display events
+	for (let i = 0; i < Math.min(data.data.events.length, limit); i++) {
+		const event = data.data.events[i];
+		const timestamp = formatTimestamp(event.block_timestamp);
+		const txId = event.transaction_id?.substring(0, 20) + '...' || 'N/A';
+
+		// Determine event type
+		let eventTypeStr = 'UNKNOWN';
+		let details = '';
+
+		if (event.data?.Transaction) {
+			eventTypeStr = 'TRANSACTION';
+			const tx = event.data.Transaction;
+			details = `${tx.side?.toUpperCase() || 'UNKNOWN'} ${tx.token_amount} ${tx.token_hash?.substring(0, 10)}...`;
+		} else if (event.data?.ProcessedTrades) {
+			eventTypeStr = 'PERPTRADE';
+			const trades = event.data.ProcessedTrades.trades;
+			details = `${trades?.length || 0} trade(s)`;
+		} else if (event.data?.SettlementResult) {
+			eventTypeStr = 'SETTLEMENT';
+			details = `Settled: ${event.data.SettlementResult.settled_amount}`;
+		} else if (event.data?.LiquidationResult || event.data?.LiquidationResultV2) {
+			eventTypeStr = 'LIQUIDATION';
+			details = 'Liquidation event';
+		} else if (event.data?.AdlResult || event.data?.AdlResultV2) {
+			eventTypeStr = 'ADL';
+			details = 'Auto-deleveraging';
+		}
+
+		console.log(`${timestamp} | ${eventTypeStr.padEnd(12)} | ${txId} | ${details}`);
+	}
+
+	// Show pagination info
+	if (data.data.trading_event_next_cursor) {
+		console.log('\n📄 Trading events have more pages');
+	}
+	if (data.data.settlement_event_next_cursor) {
+		console.log('📄 Settlement events have more pages');
+	}
+	if (data.data.liquidation_event_next_cursor) {
+		console.log('📄 Liquidation events have more pages');
+	}
+}
+
+// Display funding payments
+async function showFunding(env) {
+	console.log('\n💸 FUNDING PAYMENTS');
+	console.log('═'.repeat(80));
+
+	const accountId = getAccountId();
+	console.log(`Account ID: ${accountId}\n`);
+
+	const toTime = Math.floor(Date.now() / 1000);
+	const fromTime = toTime - 7 * 24 * 60 * 60; // 7 days ago
+
+	const data = await fetchIndexer(env, '/events_v2', {
+		account_id: accountId,
+		event_type: 'SETTLEMENT',
+		from_time: fromTime,
+		to_time: toTime
+	});
+
+	if (!data || !data.success) {
+		console.log('❌ Failed to fetch funding data:', data?.message || 'Unknown error');
+		return;
+	}
+
+	if (!data.data || !data.data.events || data.data.events.length === 0) {
+		console.log('No funding payments in the last 7 days');
+		return;
+	}
+
+	console.log(`Found ${data.data.events.length} settlement events\n`);
+
+	// Header
+	console.log(`${'Time'.padEnd(20)} ${'Amount'.padEnd(20)} ${'Asset'.padEnd(15)}`);
+	console.log('─'.repeat(80));
+
+	// Display funding payments
+	for (const event of data.data.events) {
+		if (event.data?.SettlementResult) {
+			const settlement = event.data.SettlementResult;
+			const timestamp = formatTimestamp(event.block_timestamp);
+			const amount = formatCurrency(parseFloat(settlement.settled_amount));
+			const asset = settlement.settled_asset_hash?.substring(0, 12) || 'Unknown';
+
+			console.log(`${timestamp.padEnd(20)} ${amount.padEnd(20)} ${asset.padEnd(15)}`);
+		}
+	}
+}
+
 // Quick health check
 async function showHealth(env) {
 	console.log('\n🏥 HEALTH CHECK');
@@ -406,8 +667,6 @@ async function showAll(env) {
 	console.log(`API URL: ${ENV_URLS[env]}`);
 	console.log(`Time: ${new Date().toLocaleString()}`);
 
-	await showBalance(env);
-	await showPositions(env);
 	await showPortfolio(env);
 
 	console.log('\n✅ Status check complete');
@@ -453,6 +712,15 @@ async function main() {
 		case 'logs':
 			await showLogs(env, parseInt(params[0]) || 20);
 			break;
+		case 'trades':
+			await showTrades(env, parseInt(params[0]) || 20);
+			break;
+		case 'events':
+			await showEvents(env, params[0], parseInt(params[1]) || 20);
+			break;
+		case 'funding':
+			await showFunding(env);
+			break;
 		case 'health':
 			await showHealth(env);
 			break;
@@ -468,12 +736,16 @@ async function main() {
 			console.log('  indicators <symbol>    - Show latest indicators');
 			console.log('  history <symbol> [ind] [limit] - Show historical data');
 			console.log('  logs [limit]           - Show recent logs');
+			console.log('  trades [limit]         - Show recent trades (Indexer API)');
+			console.log('  events [type] [limit]  - Show account events (Indexer API)');
+			console.log('  funding                - Show funding payments (Indexer API)');
 			console.log('  health                 - Quick health check');
 			console.log('\nExamples:');
 			console.log('  node scripts/check-status.js');
 			console.log('  node scripts/check-status.js testnet positions');
 			console.log('  node scripts/check-status.js production balance');
-			console.log('  node scripts/check-status.js testnet position PERP_NEAR_USDC');
+			console.log('  node scripts/check-status.js testnet trades 20');
+			console.log('  node scripts/check-status.js testnet events PERPTRADE 10');
 	}
 
 	console.log();

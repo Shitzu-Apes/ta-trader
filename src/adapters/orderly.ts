@@ -23,10 +23,14 @@ interface OrderlyPosition {
 	settle_price: number;
 	average_open_price: number;
 	mark_price: number;
-	unrealized_pnl: number;
-	realized_pnl: number;
+	unsettled_pnl: number;
+	realized_pnl?: number;
 	est_liq_price: number;
-	est_margin_ratio: number;
+	leverage?: string;
+	imr?: number;
+	mmr?: number;
+	pnl_24_h?: number;
+	fee_24_h?: number;
 }
 
 interface OrderlyHolding {
@@ -141,14 +145,21 @@ export class OrderlyAdapter implements TradingAdapter {
 				return null;
 			}
 
+			// Calculate unrealized PnL: (Mark Price - Entry Price) * Size * Direction
+			// Direction: +1 for LONG, -1 for SHORT
+			const direction = orderlyPos.position_qty > 0 ? 1 : -1;
+			const priceDiff = orderlyPos.mark_price - orderlyPos.average_open_price;
+			const unrealizedPnl = priceDiff * Math.abs(orderlyPos.position_qty) * direction;
+
 			const position: Position = {
 				symbol,
 				size: Math.abs(orderlyPos.position_qty),
 				isLong: orderlyPos.position_qty > 0,
 				lastUpdateTime: Date.now(),
 				entryPrice: orderlyPos.average_open_price,
-				unrealizedPnl: orderlyPos.unrealized_pnl,
-				realizedPnl: orderlyPos.realized_pnl
+				markPrice: orderlyPos.mark_price,
+				unrealizedPnl: unrealizedPnl,
+				realizedPnl: orderlyPos.realized_pnl || 0
 			};
 
 			logger.info('Position retrieved', ctx, {
@@ -185,14 +196,21 @@ export class OrderlyAdapter implements TradingAdapter {
 				continue;
 			}
 
+			// Calculate unrealized PnL: (Mark Price - Entry Price) * Size * Direction
+			// Direction: +1 for LONG, -1 for SHORT
+			const direction = orderlyPos.position_qty > 0 ? 1 : -1;
+			const priceDiff = orderlyPos.mark_price - orderlyPos.average_open_price;
+			const unrealizedPnl = priceDiff * Math.abs(orderlyPos.position_qty) * direction;
+
 			positions.push({
 				symbol: orderlyPos.symbol,
 				size: Math.abs(orderlyPos.position_qty),
 				isLong: orderlyPos.position_qty > 0,
 				lastUpdateTime: Date.now(),
 				entryPrice: orderlyPos.average_open_price,
-				unrealizedPnl: orderlyPos.unrealized_pnl,
-				realizedPnl: orderlyPos.realized_pnl
+				markPrice: orderlyPos.mark_price,
+				unrealizedPnl: unrealizedPnl,
+				realizedPnl: orderlyPos.realized_pnl || 0
 			});
 		}
 
