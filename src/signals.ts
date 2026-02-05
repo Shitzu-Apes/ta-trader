@@ -3,10 +3,19 @@ import { EnvBindings } from './types';
 export type TradingSignal = {
 	symbol: string;
 	timestamp: number;
-	type: 'ENTRY' | 'EXIT' | 'HOLD' | 'NO_ACTION';
+	type: 'ENTRY' | 'EXIT' | 'HOLD' | 'NO_ACTION' | 'ADJUSTMENT';
 	direction?: 'LONG' | 'SHORT';
-	action?: 'OPEN' | 'CLOSE';
-	reason?: 'TA_SCORE' | 'STOP_LOSS' | 'TAKE_PROFIT' | 'SIGNAL_REVERSAL' | 'BELOW_THRESHOLD';
+	action?: 'OPEN' | 'CLOSE' | 'INCREASE' | 'DECREASE';
+	reason?:
+		| 'TA_SCORE'
+		| 'STOP_LOSS'
+		| 'TAKE_PROFIT'
+		| 'SIGNAL_REVERSAL'
+		| 'BELOW_THRESHOLD'
+		| 'PROFIT_TAKING'
+		| 'TIME_DECAY'
+		| 'STRENGTHENED_SIGNAL'
+		| 'WEAKENED_SIGNAL';
 	taScore: number;
 	threshold: number;
 	price: number;
@@ -21,6 +30,14 @@ export type TradingSignal = {
 		obv?: number;
 		total?: number;
 	};
+	// Dynamic position sizing fields
+	targetSize?: number; // Target position size calculated
+	currentSize?: number; // Current position size before adjustment
+	intensity?: number; // TA score intensity (0-1)
+	availableLeverage?: number; // Available leverage at decision time
+	// Score multipliers
+	profitScore?: number; // Profit score applied (if any)
+	timeDecayScore?: number; // Time decay score applied (if any)
 };
 
 const SIGNALS_PREFIX = 'signals:';

@@ -1,5 +1,13 @@
 import { ExchangeType, TradingAdapter } from './adapters';
-import { getTradingConfig, TRADING_CONFIG, MAX_ORDER_SIZE_USD } from './config';
+import {
+	getTradingConfig,
+	TRADING_CONFIG,
+	MAX_ORDER_SIZE_USD,
+	MAX_LEVERAGE_PER_SYMBOL,
+	MAX_ACCOUNT_LEVERAGE,
+	POSITION_SIZING_CONFIG,
+	PerpSymbol
+} from './config';
 import {
 	calculateObvScore,
 	calculateRsiScore,
@@ -19,6 +27,7 @@ export type Position = {
 	markPrice?: number;
 	unrealizedPnl: number;
 	realizedPnl: number;
+	openedAt: number; // Timestamp when position was first opened
 };
 
 /**
@@ -82,6 +91,96 @@ function calculateTaScore(
 }
 
 /**
+ * Calculate TA score intensity (0 to 1)
+ */
+function calculateTaIntensity(taScore: number): number {
+	return Math.min(Math.abs(taScore) / POSITION_SIZING_CONFIG.STRONG_SIGNAL_THRESHOLD, 1);
+}
+
+/**
+ * Calculate profit score for position closing decisions
+ * Returns negative score when profitable (encourages closing)
+ */
+function calculateProfitScore(position: Position, currentPrice: number): number {
+	const profitPct = position.isLong
+		? (currentPrice - position.entryPrice) / position.entryPrice
+		: (position.entryPrice - currentPrice) / position.entryPrice;
+
+	// Only apply when profitable
+	if (profitPct <= 0) return 0;
+
+	// Return negative score to encourage closing (more profit = more negative)
+	return -profitPct;
+}
+
+/**
+ * Calculate time decay score for position closing decisions
+ * Returns increasingly negative score the longer position is open
+ */
+function calculateTimeDecayScore(openedAt: number): number {
+	const ageInMinutes = Math.floor((Date.now() - openedAt) / (1000 * 60));
+	return -ageInMinutes * POSITION_SIZING_CONFIG.TIME_DECAY_MULTIPLIER;
+}
+
+/**
+ * Calculate total leverage used by all positions except optionally one
+ */
+function calculateUsedLeverage(
+	positions: Position[],
+	balance: number,
+	excludeSymbol?: string
+): number {
+	if (balance <= 0) return 0;
+
+	let totalPositionValue = 0;
+	for (const pos of positions) {
+		if (pos.symbol !== excludeSymbol) {
+			// Use markPrice if available, otherwise entryPrice
+			const price = pos.markPrice || pos.entryPrice;
+			totalPositionValue += pos.size * price;
+		}
+	}
+
+	return totalPositionValue / balance;
+}
+
+/**
+ * Calculate target position size based on TA score, balance, and leverage constraints
+ */
+function calculateTargetPositionSize(
+	balance: number,
+	taScore: number,
+	symbol: PerpSymbol,
+	currentPosition: Position | null,
+	allPositions: Position[]
+): { targetSize: number; intensity: number; availableLeverage: number } {
+	// Calculate used leverage from other positions
+	const usedLeverage = calculateUsedLeverage(allPositions, balance, symbol);
+	const availableAccountLeverage = Math.max(0, MAX_ACCOUNT_LEVERAGE - usedLeverage);
+
+	// Get symbol-specific max leverage
+	const symbolMaxLeverage = MAX_LEVERAGE_PER_SYMBOL[symbol];
+
+	// Use the more restrictive of symbol max or available account leverage
+	const effectiveMaxLeverage = Math.min(symbolMaxLeverage, availableAccountLeverage);
+
+	// Calculate max position size based on leverage
+	const maxPositionSize = balance * effectiveMaxLeverage;
+
+	// Normalize TA score to 0-1 intensity
+	const intensity = calculateTaIntensity(taScore);
+
+	// Calculate target size
+	let targetSize = maxPositionSize * intensity;
+
+	// Apply liquidity cap
+	const liquidityCap = MAX_ORDER_SIZE_USD[symbol];
+	targetSize = Math.min(targetSize, liquidityCap);
+
+	return { targetSize, intensity, availableLeverage: effectiveMaxLeverage };
+}
+
+/**
  * Get actual price from the adapter
  */
 async function getActualPrice(adapter: TradingAdapter, symbol: string): Promise<number> {
@@ -94,7 +193,7 @@ async function getActualPrice(adapter: TradingAdapter, symbol: string): Promise<
 }
 
 /**
- * Analyze market data and decide trading action
+ * Analyze market data and decide trading action with dynamic position sizing
  */
 export async function analyzeForecast(
 	adapter: TradingAdapter,
@@ -114,6 +213,10 @@ export async function analyzeForecast(
 	// Get current position from Orderly
 	logger.debug('Fetching current position', ctx);
 	const currentPosition = await adapter.getPosition(symbol);
+
+	// Get all positions for leverage calculation
+	logger.debug('Fetching all positions for leverage calculation', ctx);
+	const allPositions = await adapter.getPositions();
 
 	// Get actual price from adapter
 	logger.debug('Fetching actual price', ctx);
@@ -142,8 +245,9 @@ export async function analyzeForecast(
 	);
 	const taScore = taScoreResult.score;
 	const indicatorScores = taScoreResult.indicators;
+	const intensity = calculateTaIntensity(taScore);
 
-	logger.info('TA Score calculated', ctx, { taScore });
+	logger.info('TA Score calculated', ctx, { taScore, intensity });
 
 	// Get environment-specific config
 	const tradingConfig = getTradingConfig(_env);
@@ -155,7 +259,31 @@ export async function analyzeForecast(
 			: TRADING_CONFIG.POSITION_THRESHOLDS.short
 		: TRADING_CONFIG.POSITION_THRESHOLDS.long;
 
-	// Check if we should close existing position
+	// Get balance
+	logger.debug('Fetching balance', ctx);
+	const balance = await adapter.getBalance();
+	if (balance <= 0) {
+		logger.warn('Insufficient balance', ctx, { balance });
+		return;
+	}
+
+	// Calculate target position size based on TA score and leverage
+	const { targetSize, availableLeverage } = calculateTargetPositionSize(
+		balance,
+		taScore,
+		symbol as PerpSymbol,
+		currentPosition,
+		allPositions
+	);
+
+	logger.info('Target position size calculated', ctx, {
+		targetSize,
+		intensity,
+		availableLeverage,
+		currentPositionSize: currentPosition?.size || 0
+	});
+
+	// Check if we should close existing position or adjust it
 	if (currentPosition) {
 		const position = currentPosition;
 		const priceDiff = (actualPrice - position.entryPrice) / position.entryPrice;
@@ -166,7 +294,8 @@ export async function analyzeForecast(
 			entryPrice: position.entryPrice,
 			currentPrice: actualPrice,
 			unrealizedPnl: position.unrealizedPnl,
-			priceDiff: (priceDiff * 100).toFixed(4) + '%'
+			priceDiff: (priceDiff * 100).toFixed(4) + '%',
+			openedAt: new Date(position.openedAt).toISOString()
 		});
 
 		// Check stop loss
@@ -178,26 +307,16 @@ export async function analyzeForecast(
 				threshold: (tradingConfig.STOP_LOSS_THRESHOLD * 100).toFixed(2) + '%'
 			});
 
-			// Store exit signal
-			const exitSignal: TradingSignal = {
+			await closePositionWithSignal(
+				adapter,
 				symbol,
-				timestamp: Date.now(),
-				type: 'EXIT',
-				action: 'CLOSE',
-				direction: position.isLong ? 'LONG' : 'SHORT',
-				reason: 'STOP_LOSS',
+				position,
+				_env,
+				'STOP_LOSS',
 				taScore,
-				threshold: tradingConfig.STOP_LOSS_THRESHOLD,
-				price: actualPrice,
-				positionSize: position.size,
-				entryPrice: position.entryPrice,
-				unrealizedPnl: position.unrealizedPnl,
-				realizedPnl: position.realizedPnl,
-				indicators: indicatorScores
-			};
-			await storeSignal(_env, exitSignal);
-
-			await closePosition(adapter, symbol, position);
+				indicatorScores,
+				actualPrice
+			);
 			return;
 		}
 
@@ -210,59 +329,142 @@ export async function analyzeForecast(
 				threshold: (tradingConfig.TAKE_PROFIT_THRESHOLD * 100).toFixed(2) + '%'
 			});
 
-			// Store exit signal
-			const exitSignal: TradingSignal = {
+			await closePositionWithSignal(
+				adapter,
 				symbol,
-				timestamp: Date.now(),
-				type: 'EXIT',
-				action: 'CLOSE',
-				direction: position.isLong ? 'LONG' : 'SHORT',
-				reason: 'TAKE_PROFIT',
+				position,
+				_env,
+				'TAKE_PROFIT',
 				taScore,
-				threshold: tradingConfig.TAKE_PROFIT_THRESHOLD,
-				price: actualPrice,
-				positionSize: position.size,
-				entryPrice: position.entryPrice,
-				unrealizedPnl: position.unrealizedPnl,
-				realizedPnl: position.realizedPnl,
-				indicators: indicatorScores
-			};
-			await storeSignal(_env, exitSignal);
-
-			await closePosition(adapter, symbol, position);
+				indicatorScores,
+				actualPrice
+			);
 			return;
 		}
 
-		// Check if signal reversed (score opposite to position direction)
-		const shouldClose = position.isLong ? taScore < thresholds.sell : taScore > thresholds.sell;
+		// Calculate exit score with profit and time decay multipliers
+		const profitScore = calculateProfitScore(position, actualPrice);
+		const timeDecayScore = calculateTimeDecayScore(position.openedAt);
+		const exitScore =
+			taScore +
+			profitScore * POSITION_SIZING_CONFIG.PROFIT_SCORE_MULTIPLIER +
+			timeDecayScore * POSITION_SIZING_CONFIG.TIME_DECAY_MULTIPLIER;
+
+		logger.info('Exit score calculated', ctx, {
+			taScore,
+			profitScore,
+			timeDecayScore,
+			exitScore,
+			profitMultiplier: POSITION_SIZING_CONFIG.PROFIT_SCORE_MULTIPLIER,
+			timeDecayMultiplier: POSITION_SIZING_CONFIG.TIME_DECAY_MULTIPLIER
+		});
+
+		// Check if signal reversed or multipliers triggered close
+		const shouldClose = position.isLong ? exitScore < thresholds.sell : exitScore > thresholds.sell;
 
 		if (shouldClose) {
-			logger.info('Signal reversal triggered', ctx, {
-				taScore,
+			logger.info('Signal reversal or multipliers triggered close', ctx, {
+				exitScore,
 				threshold: thresholds.sell,
-				isLong: position.isLong
+				isLong: position.isLong,
+				reason:
+					profitScore < 0 ? 'PROFIT_TAKING' : timeDecayScore < 0 ? 'TIME_DECAY' : 'SIGNAL_REVERSAL'
 			});
 
-			// Store exit signal
-			const exitSignal: TradingSignal = {
+			await closePositionWithSignal(
+				adapter,
 				symbol,
-				timestamp: Date.now(),
-				type: 'EXIT',
-				action: 'CLOSE',
-				direction: position.isLong ? 'LONG' : 'SHORT',
-				reason: 'SIGNAL_REVERSAL',
+				position,
+				_env,
+				profitScore < 0 ? 'PROFIT_TAKING' : timeDecayScore < 0 ? 'TIME_DECAY' : 'SIGNAL_REVERSAL',
 				taScore,
-				threshold: thresholds.sell,
-				price: actualPrice,
-				positionSize: position.size,
-				entryPrice: position.entryPrice,
-				unrealizedPnl: position.unrealizedPnl,
-				realizedPnl: position.realizedPnl,
-				indicators: indicatorScores
-			};
-			await storeSignal(_env, exitSignal);
+				indicatorScores,
+				actualPrice,
+				{ profitScore, timeDecayScore, exitScore }
+			);
 
-			await closePosition(adapter, symbol, position);
+			// Potentially open opposite position if signal strong enough
+			if (Math.abs(taScore) > Math.abs(thresholds.buy)) {
+				const newDirection = taScore > 0 ? 'LONG' : 'SHORT';
+				logger.info('Opening opposite position after close', ctx, {
+					direction: newDirection,
+					taScore,
+					targetSize
+				});
+				await openPosition(
+					adapter,
+					symbol,
+					targetSize,
+					newDirection,
+					_env,
+					taScore,
+					indicatorScores,
+					actualPrice,
+					intensity,
+					availableLeverage
+				);
+			}
+			return;
+		}
+
+		// Same direction - check if we need to adjust position size
+		const currentSize = position.size;
+		const sizeDiff = targetSize - currentSize;
+		const adjustmentThreshold =
+			currentSize * POSITION_SIZING_CONFIG.POSITION_ADJUSTMENT_THRESHOLD_PERCENT;
+
+		if (
+			Math.abs(sizeDiff) > adjustmentThreshold &&
+			Math.abs(sizeDiff) > POSITION_SIZING_CONFIG.MIN_ORDER_SIZE_USD
+		) {
+			if (sizeDiff > 0) {
+				// Increase position
+				logger.info('Increasing position size', ctx, {
+					currentSize,
+					targetSize,
+					increaseBy: sizeDiff,
+					reason: 'STRENGTHENED_SIGNAL'
+				});
+				await adjustPositionSize(
+					adapter,
+					symbol,
+					sizeDiff,
+					'INCREASE',
+					position.isLong ? 'LONG' : 'SHORT',
+					_env,
+					taScore,
+					indicatorScores,
+					actualPrice,
+					targetSize,
+					currentSize,
+					intensity,
+					availableLeverage
+				);
+			} else {
+				// Decrease position (partial close)
+				const decreaseSize = Math.abs(sizeDiff);
+				logger.info('Decreasing position size', ctx, {
+					currentSize,
+					targetSize,
+					decreaseBy: decreaseSize,
+					reason: 'WEAKENED_SIGNAL'
+				});
+				await adjustPositionSize(
+					adapter,
+					symbol,
+					decreaseSize,
+					'DECREASE',
+					position.isLong ? 'LONG' : 'SHORT',
+					_env,
+					taScore,
+					indicatorScores,
+					actualPrice,
+					targetSize,
+					currentSize,
+					intensity,
+					availableLeverage
+				);
+			}
 			return;
 		}
 
@@ -271,7 +473,10 @@ export async function analyzeForecast(
 			size: position.size,
 			entryPrice: position.entryPrice,
 			unrealizedPnl: position.unrealizedPnl,
-			priceDiff: (priceDiff * 100).toFixed(4) + '%'
+			priceDiff: (priceDiff * 100).toFixed(4) + '%',
+			targetSize,
+			sizeDiff: sizeDiff > 0 ? `+${sizeDiff.toFixed(2)}` : sizeDiff.toFixed(2),
+			adjustmentThreshold: adjustmentThreshold.toFixed(2)
 		});
 
 		// Store hold signal
@@ -287,110 +492,49 @@ export async function analyzeForecast(
 			entryPrice: position.entryPrice,
 			unrealizedPnl: position.unrealizedPnl,
 			realizedPnl: position.realizedPnl,
-			indicators: indicatorScores
+			indicators: indicatorScores,
+			targetSize,
+			currentSize: position.size,
+			intensity,
+			availableLeverage
 		};
 		await storeSignal(_env, holdSignal);
 
 		return;
 	}
 
-	// Check if we should open a new position
+	// No position - check if we should open a new one
 	if (Math.abs(taScore) > Math.abs(thresholds.buy)) {
-		// Determine direction based on score sign
-		const goLong = taScore > 0;
+		const direction = taScore > 0 ? 'LONG' : 'SHORT';
 
-		// Get balance
-		logger.debug('Fetching balance for position opening', ctx);
-		const balance = await adapter.getBalance();
-		if (balance <= 0) {
-			logger.warn('Insufficient balance', ctx, { balance });
-			return;
-		}
-
-		// Apply max order size limit based on symbol liquidity
-		const maxOrderSize = MAX_ORDER_SIZE_USD[symbol as keyof typeof MAX_ORDER_SIZE_USD] || balance;
-		const orderSize = Math.min(balance, maxOrderSize);
-
-		if (orderSize < maxOrderSize) {
-			logger.info(`Order size limited by available balance`, ctx, {
-				requested: maxOrderSize,
-				available: balance,
-				using: orderSize
-			});
-		} else if (orderSize < balance) {
-			logger.info(`Order size limited by max order size for ${symbol}`, ctx, {
-				balance,
-				maxOrderSize,
-				using: orderSize
-			});
-		}
-
-		const exchangeType = adapter.getExchangeType();
-		const options =
-			exchangeType === ExchangeType.AMM
-				? ({
-						type: ExchangeType.AMM,
-						maxPriceImpact: 0.05
-					} as const)
-				: ({
-						type: ExchangeType.ORDERBOOK,
-						orderType: 'market' as const
-					} as const);
-
-		// Open position
-		logger.info(`Opening ${goLong ? 'long' : 'short'} position`, ctx, {
+		logger.info(`Opening new ${direction} position`, ctx, {
 			taScore,
 			balance,
-			orderSize,
+			targetSize,
+			intensity,
+			availableLeverage,
 			threshold: thresholds.buy
 		});
 
-		try {
-			if (goLong) {
-				await adapter.openLongPosition(symbol, orderSize, options);
-			} else {
-				if (!adapter.openShortPosition) {
-					logger.error('Short positions not supported by adapter', undefined, ctx);
-					return;
-				}
-				await adapter.openShortPosition(symbol, orderSize, options);
-			}
-
-			const remainingBalance = await adapter.getBalance();
-			logger.info('Position opened successfully', ctx, {
-				direction: goLong ? 'LONG' : 'SHORT',
-				size: orderSize,
-				remainingBalance
-			});
-
-			// Store entry signal
-			const entrySignal: TradingSignal = {
-				symbol,
-				timestamp: Date.now(),
-				type: 'ENTRY',
-				action: 'OPEN',
-				direction: goLong ? 'LONG' : 'SHORT',
-				reason: 'TA_SCORE',
-				taScore,
-				threshold: thresholds.buy,
-				price: actualPrice,
-				positionSize: orderSize,
-				indicators: indicatorScores
-			};
-			await storeSignal(_env, entrySignal);
-		} catch (error) {
-			logger.error('Failed to open position', error as Error, ctx, {
-				direction: goLong ? 'LONG' : 'SHORT',
-				balance
-			});
-			throw error;
-		}
+		await openPosition(
+			adapter,
+			symbol,
+			targetSize,
+			direction,
+			_env,
+			taScore,
+			indicatorScores,
+			actualPrice,
+			intensity,
+			availableLeverage
+		);
 		return;
 	}
 
 	logger.info('No position action taken', ctx, {
 		taScore,
 		buyThreshold: thresholds.buy,
+		intensity,
 		reason: 'Score below threshold'
 	});
 
@@ -402,7 +546,9 @@ export async function analyzeForecast(
 		taScore,
 		threshold: thresholds.buy,
 		price: actualPrice,
-		indicators: indicatorScores
+		indicators: indicatorScores,
+		intensity,
+		availableLeverage
 	};
 	await storeSignal(_env, noActionSignal);
 }
@@ -592,7 +738,293 @@ export async function checkSignalReversal(
 }
 
 /**
- * Close a position
+ * Close a position with signal storage
+ */
+async function closePositionWithSignal(
+	adapter: TradingAdapter,
+	symbol: string,
+	position: Position,
+	env: EnvBindings,
+	reason: 'STOP_LOSS' | 'TAKE_PROFIT' | 'SIGNAL_REVERSAL' | 'PROFIT_TAKING' | 'TIME_DECAY',
+	taScore: number,
+	indicators: TradingSignal['indicators'],
+	price: number,
+	extraScores?: { profitScore?: number; timeDecayScore?: number; exitScore?: number }
+): Promise<void> {
+	const logger = getLogger();
+	const ctx = createContext(symbol, 'close_position');
+
+	logger.info('Closing position', ctx, {
+		direction: position.isLong ? 'LONG' : 'SHORT',
+		size: position.size,
+		entryPrice: position.entryPrice,
+		unrealizedPnl: position.unrealizedPnl,
+		realizedPnl: position.realizedPnl,
+		reason,
+		...extraScores
+	});
+
+	// Store exit signal
+	const exitSignal: TradingSignal = {
+		symbol,
+		timestamp: Date.now(),
+		type: 'EXIT',
+		action: 'CLOSE',
+		direction: position.isLong ? 'LONG' : 'SHORT',
+		reason,
+		taScore,
+		threshold:
+			reason === 'STOP_LOSS'
+				? getTradingConfig(env).STOP_LOSS_THRESHOLD
+				: reason === 'TAKE_PROFIT'
+					? getTradingConfig(env).TAKE_PROFIT_THRESHOLD
+					: 0,
+		price,
+		positionSize: position.size,
+		entryPrice: position.entryPrice,
+		unrealizedPnl: position.unrealizedPnl,
+		realizedPnl: position.realizedPnl,
+		indicators,
+		profitScore: extraScores?.profitScore,
+		timeDecayScore: extraScores?.timeDecayScore
+	};
+	await storeSignal(env, exitSignal);
+
+	const exchangeType = adapter.getExchangeType();
+	const options =
+		exchangeType === ExchangeType.AMM
+			? ({
+					type: ExchangeType.AMM,
+					maxPriceImpact: 0.05
+				} as const)
+			: ({
+					type: ExchangeType.ORDERBOOK,
+					orderType: 'market' as const
+				} as const);
+
+	try {
+		// Close position using adapter
+		if (position.isLong) {
+			await adapter.closeLongPosition(symbol, position.size, options);
+		} else {
+			if (!adapter.closeShortPosition) {
+				throw new Error('Adapter does not support short positions');
+			}
+			await adapter.closeShortPosition(symbol, position.size, options);
+		}
+
+		logger.info('Position closed successfully', ctx, {
+			direction: position.isLong ? 'LONG' : 'SHORT',
+			size: position.size,
+			realizedPnl: position.realizedPnl
+		});
+	} catch (error) {
+		logger.error('Failed to close position', error as Error, ctx, {
+			direction: position.isLong ? 'LONG' : 'SHORT',
+			size: position.size
+		});
+		throw error;
+	}
+}
+
+/**
+ * Open a new position
+ */
+async function openPosition(
+	adapter: TradingAdapter,
+	symbol: string,
+	size: number,
+	direction: 'LONG' | 'SHORT',
+	env: EnvBindings,
+	taScore: number,
+	indicators: TradingSignal['indicators'],
+	price: number,
+	intensity: number,
+	availableLeverage: number
+): Promise<void> {
+	const logger = getLogger();
+	const ctx = createContext(symbol, 'open_position');
+
+	// Check minimum order size
+	if (size < POSITION_SIZING_CONFIG.MIN_ORDER_SIZE_USD) {
+		logger.warn('Order size below minimum, skipping', ctx, {
+			size,
+			minSize: POSITION_SIZING_CONFIG.MIN_ORDER_SIZE_USD
+		});
+		return;
+	}
+
+	logger.info(`Opening ${direction} position`, ctx, {
+		taScore,
+		size,
+		intensity,
+		availableLeverage
+	});
+
+	const exchangeType = adapter.getExchangeType();
+	const options =
+		exchangeType === ExchangeType.AMM
+			? ({
+					type: ExchangeType.AMM,
+					maxPriceImpact: 0.05
+				} as const)
+			: ({
+					type: ExchangeType.ORDERBOOK,
+					orderType: 'market' as const
+				} as const);
+
+	try {
+		if (direction === 'LONG') {
+			await adapter.openLongPosition(symbol, size, options);
+		} else {
+			if (!adapter.openShortPosition) {
+				logger.error('Short positions not supported by adapter', undefined, ctx);
+				return;
+			}
+			await adapter.openShortPosition(symbol, size, options);
+		}
+
+		logger.info('Position opened successfully', ctx, {
+			direction,
+			size
+		});
+
+		// Store entry signal
+		const entrySignal: TradingSignal = {
+			symbol,
+			timestamp: Date.now(),
+			type: 'ENTRY',
+			action: 'OPEN',
+			direction,
+			reason: 'TA_SCORE',
+			taScore,
+			threshold: 0,
+			price,
+			positionSize: size,
+			indicators,
+			intensity,
+			availableLeverage
+		};
+		await storeSignal(env, entrySignal);
+	} catch (error) {
+		logger.error('Failed to open position', error as Error, ctx, {
+			direction,
+			size
+		});
+		throw error;
+	}
+}
+
+/**
+ * Adjust position size (increase or decrease)
+ */
+async function adjustPositionSize(
+	adapter: TradingAdapter,
+	symbol: string,
+	size: number,
+	action: 'INCREASE' | 'DECREASE',
+	direction: 'LONG' | 'SHORT',
+	env: EnvBindings,
+	taScore: number,
+	indicators: TradingSignal['indicators'],
+	price: number,
+	targetSize: number,
+	currentSize: number,
+	intensity: number,
+	availableLeverage: number
+): Promise<void> {
+	const logger = getLogger();
+	const ctx = createContext(symbol, 'adjust_position');
+
+	// Check minimum order size
+	if (size < POSITION_SIZING_CONFIG.MIN_ORDER_SIZE_USD) {
+		logger.warn('Adjustment size below minimum, skipping', ctx, {
+			size,
+			minSize: POSITION_SIZING_CONFIG.MIN_ORDER_SIZE_USD
+		});
+		return;
+	}
+
+	logger.info(`${action} position`, ctx, {
+		direction,
+		size,
+		currentSize,
+		targetSize
+	});
+
+	const exchangeType = adapter.getExchangeType();
+	const options =
+		exchangeType === ExchangeType.AMM
+			? ({
+					type: ExchangeType.AMM,
+					maxPriceImpact: 0.05
+				} as const)
+			: ({
+					type: ExchangeType.ORDERBOOK,
+					orderType: 'market' as const
+				} as const);
+
+	try {
+		if (action === 'INCREASE') {
+			// Add to position
+			if (direction === 'LONG') {
+				await adapter.openLongPosition(symbol, size, options);
+			} else {
+				if (!adapter.openShortPosition) {
+					throw new Error('Adapter does not support short positions');
+				}
+				await adapter.openShortPosition(symbol, size, options);
+			}
+		} else {
+			// Partial close
+			if (direction === 'LONG') {
+				await adapter.closeLongPosition(symbol, size, options);
+			} else {
+				if (!adapter.closeShortPosition) {
+					throw new Error('Adapter does not support short positions');
+				}
+				await adapter.closeShortPosition(symbol, size, options);
+			}
+		}
+
+		logger.info('Position adjusted successfully', ctx, {
+			action,
+			direction,
+			size,
+			newTargetSize: targetSize
+		});
+
+		// Store adjustment signal
+		const adjustmentSignal: TradingSignal = {
+			symbol,
+			timestamp: Date.now(),
+			type: 'ADJUSTMENT',
+			action,
+			direction,
+			reason: action === 'INCREASE' ? 'STRENGTHENED_SIGNAL' : 'WEAKENED_SIGNAL',
+			taScore,
+			threshold: 0,
+			price,
+			positionSize: size,
+			targetSize,
+			currentSize,
+			indicators,
+			intensity,
+			availableLeverage
+		};
+		await storeSignal(env, adjustmentSignal);
+	} catch (error) {
+		logger.error('Failed to adjust position', error as Error, ctx, {
+			action,
+			direction,
+			size
+		});
+		throw error;
+	}
+}
+
+/**
+ * Close a position (legacy function for backward compatibility)
  */
 async function closePosition(
 	adapter: TradingAdapter,

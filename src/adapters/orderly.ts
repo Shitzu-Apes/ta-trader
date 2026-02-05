@@ -33,6 +33,7 @@ interface OrderlyPosition {
 	mmr?: number;
 	pnl_24_h?: number;
 	fee_24_h?: number;
+	timestamp?: number; // Position open/update timestamp from Orderly
 }
 
 interface OrderlyHolding {
@@ -194,7 +195,8 @@ export class OrderlyAdapter implements TradingAdapter {
 				entryPrice: orderlyPos.average_open_price,
 				markPrice: orderlyPos.mark_price,
 				unrealizedPnl: unrealizedPnl,
-				realizedPnl: orderlyPos.realized_pnl || 0
+				realizedPnl: orderlyPos.realized_pnl || 0,
+				openedAt: orderlyPos.timestamp || Date.now() // Use Orderly timestamp if available
 			};
 
 			logger.info('Position retrieved', ctx, {
@@ -245,7 +247,8 @@ export class OrderlyAdapter implements TradingAdapter {
 				entryPrice: orderlyPos.average_open_price,
 				markPrice: orderlyPos.mark_price,
 				unrealizedPnl: unrealizedPnl,
-				realizedPnl: orderlyPos.realized_pnl || 0
+				realizedPnl: orderlyPos.realized_pnl || 0,
+				openedAt: orderlyPos.timestamp || Date.now() // Use Orderly timestamp if available
 			});
 		}
 

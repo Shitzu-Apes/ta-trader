@@ -55,6 +55,34 @@ export const MAX_ORDER_SIZE_USD: Record<PerpSymbol, number> = {
 	[PERP_SYMBOLS.BNB]: 2000
 };
 
+// Max leverage per symbol (how much leverage to use for each symbol)
+export const MAX_LEVERAGE_PER_SYMBOL: Record<PerpSymbol, number> = {
+	[PERP_SYMBOLS.BTC]: 5,
+	[PERP_SYMBOLS.ETH]: 5,
+	[PERP_SYMBOLS.SOL]: 4,
+	[PERP_SYMBOLS.BNB]: 4,
+	[PERP_SYMBOLS.NEAR]: 3
+};
+
+// Max total account leverage across all positions
+export const MAX_ACCOUNT_LEVERAGE = 5;
+
+// Position sizing configuration
+export const POSITION_SIZING_CONFIG = {
+	// TA score threshold considered "strong" (for intensity calculation)
+	STRONG_SIGNAL_THRESHOLD: 3.0,
+
+	// Minimum order size in USD
+	MIN_ORDER_SIZE_USD: 50,
+
+	// Position adjustment threshold (20% of max leverage position size)
+	POSITION_ADJUSTMENT_THRESHOLD_PERCENT: 0.2,
+
+	// Score multipliers
+	PROFIT_SCORE_MULTIPLIER: 0.75,
+	TIME_DECAY_MULTIPLIER: 0.01 // per minute
+} as const;
+
 // Environment-specific configurations
 const ENV_CONFIGS: Record<
 	'testnet' | 'production',
