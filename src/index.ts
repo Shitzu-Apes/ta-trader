@@ -8,9 +8,12 @@ import { cors } from 'hono/cors';
 import { poweredBy } from 'hono/powered-by';
 import type { HTTPResponseError } from 'hono/types';
 
+import { getAdapter } from './adapters';
 import { HTTP_CONFIG } from './config';
 import datapoints from './datapoints';
+import { getLogger, resetLogger, createContext, withTiming } from './logger';
 import { updateIndicators, analyzeMarketData } from './taapi';
+import { checkAndClosePositions } from './trading';
 import { EnvBindings } from './types';
 
 dayjs.extend(duration);
@@ -31,15 +34,23 @@ app.use(
 	})
 );
 
-app.onError(async (err) => {
+app.onError(async (err, c) => {
+	const logger = getLogger(c.env as EnvBindings);
+
 	if (typeof (err as HTTPResponseError)['getResponse'] !== 'undefined') {
 		const httpErr = err as HTTPResponseError;
 		const res = httpErr.getResponse();
 		const text = await res.clone().text();
-		console.log(`[HTTPError ${res.status}]: ${text}`);
+		logger.error(`HTTP Error ${res.status}`, httpErr, createContext(undefined, 'http_error'), {
+			status: res.status,
+			response: text
+		});
+		await logger.flushNow();
 		return res;
 	}
-	console.log('Unknown error:', (err as Error).message);
+
+	logger.error('Unknown error', err as Error, createContext(undefined, 'unknown_error'));
+	await logger.flushNow();
 	return new Response(null, {
 		status: 500
 	});
@@ -50,14 +61,62 @@ app.notFound(() => {
 });
 
 async function updateIndicatorsAndTrade(env: EnvBindings) {
-	// First update indicators for all symbols
-	await updateIndicators(env);
+	const logger = getLogger(env);
+	const ctx = createContext(undefined, 'scheduled_task');
 
-	// Wait for data to be stored
-	await new Promise((resolve) => setTimeout(resolve, HTTP_CONFIG.INDICATOR_FETCH_DELAY));
+	logger.info('Starting scheduled trading cycle', ctx);
 
-	// Then run paper trading analysis only on NEAR/USDT
-	await analyzeMarketData(env, 'NEAR/USDT');
+	try {
+		// First update indicators for all symbols
+		await withTiming(logger, 'update_indicators', () => updateIndicators(env), ctx);
+
+		// Wait for data to be stored
+		await new Promise((resolve) => setTimeout(resolve, HTTP_CONFIG.INDICATOR_FETCH_DELAY));
+
+		// Then run paper trading analysis only on PERP_NEAR_USDC
+		await withTiming(
+			logger,
+			'analyze_market_data',
+			() => analyzeMarketData(env, 'PERP_NEAR_USDC'),
+			createContext('PERP_NEAR_USDC', 'market_analysis')
+		);
+
+		logger.info('Completed scheduled trading cycle', ctx);
+	} catch (error) {
+		logger.error('Scheduled trading cycle failed', error as Error, ctx);
+		throw error;
+	} finally {
+		await logger.flushNow();
+		resetLogger();
+	}
+}
+
+async function monitorPositions(env: EnvBindings) {
+	const logger = getLogger(env);
+	const ctx = createContext(undefined, 'position_monitor');
+
+	logger.info('Starting position monitoring', ctx);
+
+	try {
+		const adapter = getAdapter(env);
+
+		// Check positions for all active symbols
+		// Currently only monitoring PERP_NEAR_USDC
+		await withTiming(
+			logger,
+			'check_positions',
+			() => checkAndClosePositions(adapter, env, 'PERP_NEAR_USDC'),
+			createContext('PERP_NEAR_USDC', 'position_check')
+		);
+
+		logger.info('Completed position monitoring', ctx);
+	} catch (error) {
+		logger.error('Position monitoring failed', error as Error, ctx);
+		throw error;
+	} finally {
+		await logger.flushNow();
+		resetLogger();
+	}
 }
 
 export default {
@@ -68,6 +127,9 @@ export default {
 		switch (controller.cron) {
 			case '*/5 * * * *':
 				ctx.waitUntil(updateIndicatorsAndTrade(env));
+				break;
+			case '* * * * *':
+				ctx.waitUntil(monitorPositions(env));
 				break;
 		}
 	}

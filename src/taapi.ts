@@ -1,7 +1,7 @@
 import { getAdapter } from './adapters';
-import { PaperTradingAdapter } from './adapters/paper';
-import { TAAPI_CONFIG, TRADING_CONFIG } from './config';
+import { ORDERLY_TO_TAAPI_MAP, TAAPI_CONFIG, TRADING_CONFIG } from './config';
 import { getCurrentTimeframe } from './datapoints';
+import { getLogger, createContext } from './logger';
 import { analyzeForecast } from './trading';
 import { EnvBindings } from './types';
 
@@ -63,47 +63,82 @@ async function storeDatapoint(
 }
 
 // Fetch and store technical indicators from TAAPI
-export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
+export async function fetchTaapiIndicators(orderlySymbol: string, env: EnvBindings) {
+	const logger = getLogger(env);
+	const ctx = createContext(orderlySymbol, 'fetch_indicators');
 	const now = getCurrentTimeframe();
 	const timestamp = now.valueOf();
 
-	// Fetch indicators from TAAPI
-	const response = await fetch('https://api.taapi.io/bulk', {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify({
-			secret: env.TAAPI_SECRET,
-			construct: {
-				exchange: 'binance',
-				symbol,
-				interval: '5m',
-				indicators: [
-					{ id: 'candle', indicator: 'candle' },
-					{ id: 'vwap', indicator: 'vwap' },
-					{ id: 'atr', indicator: 'atr' },
-					{ id: 'bbands', indicator: 'bbands' },
-					{ id: 'rsi', indicator: 'rsi' },
-					{ id: 'obv', indicator: 'obv' }
-				]
-			}
-		})
-	});
+	// Convert Orderly symbol to TAAPI format for the API call
+	const taapiSymbol = ORDERLY_TO_TAAPI_MAP[orderlySymbol];
+	if (!taapiSymbol) {
+		logger.error('No TAAPI symbol mapping found', undefined, ctx);
+		throw new Error(`Unknown symbol: ${orderlySymbol}`);
+	}
 
-	const { data: bulkData } = (await response.json()) as BulkResponse;
+	logger.info('Fetching indicators from TAAPI', ctx, { timestamp, taapiSymbol });
 
-	// Store each indicator
-	await Promise.all(
-		bulkData.map(async (item) => {
-			console.log(`[${symbol}]`, `[${item.id}]`, item.result);
-			await storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
-		})
-	);
+	try {
+		// Fetch indicators from TAAPI
+		const response = await fetch('https://api.taapi.io/bulk', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				secret: env.TAAPI_SECRET,
+				construct: {
+					exchange: 'binance',
+					symbol: taapiSymbol,
+					interval: '5m',
+					indicators: [
+						{ id: 'candle', indicator: 'candle' },
+						{ id: 'vwap', indicator: 'vwap' },
+						{ id: 'atr', indicator: 'atr' },
+						{ id: 'bbands', indicator: 'bbands' },
+						{ id: 'rsi', indicator: 'rsi' },
+						{ id: 'obv', indicator: 'obv' }
+					]
+				}
+			})
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`TAAPI API error: ${response.status} - ${errorText}`);
+		}
+
+		const { data: bulkData } = (await response.json()) as BulkResponse;
+
+		logger.info(`Received ${bulkData.length} indicators from TAAPI`, ctx);
+
+		// Store each indicator using Orderly symbol
+		const storePromises = bulkData.map(async (item) => {
+			logger.debug(`Storing indicator: ${item.id}`, ctx, { value: item.result });
+			await storeDatapoint(env.DB, orderlySymbol, item.id, timestamp, item.result);
+		});
+
+		await Promise.all(storePromises);
+
+		logger.info('Successfully stored all indicators', ctx, {
+			indicatorsCount: bulkData.length,
+			timestamp
+		});
+	} catch (error) {
+		logger.error('Failed to fetch/store indicators', error as Error, ctx);
+		throw error;
+	}
 }
 
-export async function fetchHistoricalData(db: D1Database, symbol: string) {
+export async function fetchHistoricalData(db: D1Database, symbol: string, env?: EnvBindings) {
+	const logger = env ? getLogger(env) : null;
+	const ctx = createContext(symbol, 'fetch_historical_data');
 	const currentTimeframe = getCurrentTimeframe();
+
+	logger?.debug('Fetching historical data from D1', ctx, {
+		currentTimeframe: currentTimeframe.valueOf(),
+		limit: TAAPI_CONFIG.HISTORY_LIMIT
+	});
 
 	const query = `
 		WITH timestamps AS (
@@ -132,8 +167,11 @@ export async function fetchHistoricalData(db: D1Database, symbol: string) {
 		}>();
 
 	if (!results.results?.length) {
+		logger?.error('No historical data found in database', undefined, ctx);
 		throw new Error('No historical data found');
 	}
+
+	logger?.debug(`Retrieved ${results.results.length} data points`, ctx);
 
 	// Group data by timestamp
 	const groupedData = new Map<number, Record<string, Record<string, number>>>();
@@ -152,31 +190,52 @@ export async function fetchHistoricalData(db: D1Database, symbol: string) {
 			// Extract all values that will be used
 			const values = [
 				// Candle data
-				data.candle.open,
-				data.candle.high,
-				data.candle.low,
-				data.candle.close,
-				data.candle.volume,
+				data.candle?.open,
+				data.candle?.high,
+				data.candle?.low,
+				data.candle?.close,
+				data.candle?.volume,
 				// Other indicators
-				data.vwap.value,
-				data.atr.value,
-				data.bbands.valueUpperBand,
-				data.bbands.valueMiddleBand,
-				data.bbands.valueLowerBand,
-				data.rsi.value,
-				data.obv.value
+				data.vwap?.value,
+				data.atr?.value,
+				data.bbands?.valueUpperBand,
+				data.bbands?.valueMiddleBand,
+				data.bbands?.valueLowerBand,
+				data.rsi?.value,
+				data.obv?.value
 			];
 
 			// Check for any invalid values
-			const hasInvalidValue = values.some((v) => v === undefined);
+			const hasInvalidValue = values.some((v) => v === undefined || v === null);
+
+			if (hasInvalidValue) {
+				logger?.debug(`Skipping incomplete timestamp ${ts}`, ctx, {
+					missingIndicators: [
+						!data.candle && 'candle',
+						!data.vwap && 'vwap',
+						!data.atr && 'atr',
+						!data.bbands && 'bbands',
+						!data.rsi && 'rsi',
+						!data.obv && 'obv'
+					].filter(Boolean)
+				});
+			}
 
 			return !hasInvalidValue;
 		})
 		.sort((a, b) => a - b);
 
 	if (completeTimestamps.length === 0) {
+		logger?.error('No complete data found for any timestamp', undefined, ctx);
 		throw new Error('No complete data found for any timestamp');
 	}
+
+	logger?.info(`Found ${completeTimestamps.length} complete timestamps`, ctx, {
+		timeRange: {
+			oldest: completeTimestamps[0],
+			newest: completeTimestamps[completeTimestamps.length - 1]
+		}
+	});
 
 	// Extract the latest values for analysis
 	const latestData = groupedData.get(completeTimestamps[completeTimestamps.length - 1])!;
@@ -189,6 +248,15 @@ export async function fetchHistoricalData(db: D1Database, symbol: string) {
 	// Get historical prices and OBV values for technical analysis
 	const prices = completeTimestamps.map((ts) => groupedData.get(ts)!.candle.close);
 	const obvs = completeTimestamps.map((ts) => groupedData.get(ts)!.obv.value);
+
+	logger?.debug('Historical data processed', ctx, {
+		currentPrice,
+		vwap,
+		bbandsUpper,
+		bbandsLower,
+		rsi,
+		historicalDataPoints: prices.length
+	});
 
 	return {
 		currentPrice,
@@ -203,35 +271,80 @@ export async function fetchHistoricalData(db: D1Database, symbol: string) {
 
 // Get historical data and analyze
 export async function analyzeMarketData(env: EnvBindings, symbol: string) {
-	const { currentPrice, vwap, bbandsUpper, bbandsLower, rsi, prices, obvs } =
-		await fetchHistoricalData(env.DB, symbol);
+	const logger = getLogger(env);
+	const ctx = createContext(symbol, 'market_analysis');
 
-	// Create the adapter instance based on config
-	const adapter = getAdapter(env);
+	logger.info('Starting market data analysis', ctx);
 
-	// Set current price if using paper trading
-	if (TRADING_CONFIG.ADAPTER === 'paper') {
-		(adapter as PaperTradingAdapter).setCurrentPrice(currentPrice);
+	try {
+		const { currentPrice, vwap, bbandsUpper, bbandsLower, rsi, prices, obvs } =
+			await fetchHistoricalData(env.DB, symbol, env);
+
+		// Create the adapter instance
+		const adapter = getAdapter(env);
+
+		// Symbol is already in Orderly format, use directly
+		const orderlySymbol = symbol;
+
+		await analyzeForecast(
+			adapter,
+			env,
+			orderlySymbol,
+			currentPrice,
+			vwap,
+			bbandsUpper,
+			bbandsLower,
+			rsi,
+			prices,
+			obvs
+		);
+
+		logger.info('Market analysis completed', ctx);
+	} catch (error) {
+		logger.error('Market analysis failed', error as Error, ctx);
+		throw error;
 	}
-
-	await analyzeForecast(
-		adapter,
-		env,
-		symbol,
-		currentPrice,
-		vwap,
-		bbandsUpper,
-		bbandsLower,
-		rsi,
-		prices,
-		obvs
-	);
 }
 
 // Update indicators for all symbols
 export async function updateIndicators(env: EnvBindings): Promise<void> {
-	// Fetch indicators for all supported symbols in parallel
-	await Promise.all(
-		TRADING_CONFIG.SUPPORTED_SYMBOLS.map((symbol) => fetchTaapiIndicators(symbol, env))
+	const logger = getLogger(env);
+	const ctx = createContext(undefined, 'update_all_indicators');
+
+	logger.info(
+		`Starting indicator update for ${TRADING_CONFIG.SUPPORTED_SYMBOLS.length} symbols`,
+		ctx,
+		{ symbols: TRADING_CONFIG.SUPPORTED_SYMBOLS }
 	);
+
+	const results = await Promise.allSettled(
+		TRADING_CONFIG.SUPPORTED_SYMBOLS.map(async (symbol) => {
+			try {
+				await fetchTaapiIndicators(symbol, env);
+				return { symbol, success: true };
+			} catch (error) {
+				logger.error(`Failed to fetch indicators for ${symbol}`, error as Error, {
+					...ctx,
+					symbol
+				});
+				return { symbol, success: false, error: (error as Error).message };
+			}
+		})
+	);
+
+	const successful = results.filter((r) => r.status === 'fulfilled' && r.value.success).length;
+	const failed = results.length - successful;
+
+	logger.info('Indicator update completed', ctx, {
+		total: results.length,
+		successful,
+		failed,
+		details: results.map((r) =>
+			r.status === 'fulfilled' ? r.value : { symbol: 'unknown', success: false, error: r.reason }
+		)
+	});
+
+	if (failed > 0) {
+		throw new Error(`Failed to update indicators for ${failed} symbols`);
+	}
 }

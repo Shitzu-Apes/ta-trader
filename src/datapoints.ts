@@ -5,7 +5,6 @@ import { z } from 'zod';
 import { ExchangeType } from './adapters';
 import { getAdapter } from './adapters';
 import { TRADING_CONFIG } from './config';
-import { Position } from './trading';
 import { EnvBindings } from './types';
 
 const app = new Hono<{ Bindings: EnvBindings }>();
@@ -271,41 +270,22 @@ app.get('/position/:symbol', async (c) => {
 	}
 });
 
-// Get trading stats for a symbol
-app.get('/stats/:symbol', async (c) => {
-	const symbol = c.req.param('symbol');
-
-	if (!symbolSchema.safeParse(symbol).success) {
-		return c.json({ error: 'Invalid symbol' }, 400);
-	}
-
+// Get all positions
+app.get('/positions', async (c) => {
 	try {
-		const stats = await c.env.KV.get<{
-			cumulativePnl: number;
-			successfulTrades: number;
-			totalTrades: number;
-		}>(`stats:${symbol}`, 'json');
-
-		if (!stats) {
-			return c.json({
-				cumulativePnl: 0,
-				successfulTrades: 0,
-				totalTrades: 0,
-				winRate: 0
-			});
-		}
+		const adapter = getAdapter(c.env);
+		const positions = await adapter.getPositions();
 
 		return c.json({
-			...stats,
-			winRate: stats.totalTrades > 0 ? stats.successfulTrades / stats.totalTrades : 0
+			positions
 		});
 	} catch (error) {
-		console.error('Error getting stats:', error);
+		console.error('Error getting positions:', error);
 		return c.json({ error: 'Internal server error' }, 500);
 	}
 });
 
-// Get all positions and stats
+// Get portfolio summary (balance + positions)
 app.get('/portfolio', async (c) => {
 	try {
 		const adapter = getAdapter(c.env);
@@ -314,42 +294,11 @@ app.get('/portfolio', async (c) => {
 		const balance = await adapter.getBalance();
 
 		// Get all positions
-		const positions: Record<string, Position> = {};
-		const stats: Record<
-			string,
-			{
-				cumulativePnl: number;
-				successfulTrades: number;
-				totalTrades: number;
-				winRate: number;
-			}
-		> = {};
-
-		// Process each supported symbol
-		for (const symbol of symbolSchema.options) {
-			const position = await adapter.getPosition(symbol);
-			if (position) {
-				positions[symbol] = position;
-				stats[symbol] = {
-					cumulativePnl: position.cumulativePnl,
-					successfulTrades: position.successfulTrades,
-					totalTrades: position.totalTrades,
-					winRate: position.totalTrades > 0 ? position.successfulTrades / position.totalTrades : 0
-				};
-			} else {
-				stats[symbol] = {
-					cumulativePnl: 0,
-					successfulTrades: 0,
-					totalTrades: 0,
-					winRate: 0
-				};
-			}
-		}
+		const positions = await adapter.getPositions();
 
 		return c.json({
 			balance,
-			positions,
-			stats
+			positions
 		});
 	} catch (error) {
 		console.error('Error getting portfolio:', error);
@@ -357,17 +306,12 @@ app.get('/portfolio', async (c) => {
 	}
 });
 
-// Delete all positions and reset balance (for paper trading only)
+// Close all positions
 app.post('/reset', async (c) => {
-	// Only allow reset for paper trading
-	if (TRADING_CONFIG.ADAPTER !== 'paper') {
-		return c.json({ error: 'Reset is only available for paper trading' }, 400);
-	}
-
 	try {
 		const adapter = getAdapter(c.env);
 
-		// First try to close all positions properly
+		// Close all positions via Orderly API
 		for (const symbol of symbolSchema.options) {
 			try {
 				const position = await adapter.getPosition(symbol);
@@ -384,21 +328,11 @@ app.post('/reset', async (c) => {
 			}
 		}
 
-		// Then forcefully delete all position data and reset balance
-		for (const symbol of symbolSchema.options) {
-			await c.env.KV.delete(`paper:position:${symbol}`);
-			await c.env.KV.delete(`stats:${symbol}`);
-		}
-
-		// Reset balance to initial value
-		await c.env.KV.put('paper:balance:USDC', JSON.stringify(TRADING_CONFIG.INITIAL_BALANCE));
-
 		return c.json({
-			message: 'All paper trading positions closed and balance reset',
-			initialBalance: TRADING_CONFIG.INITIAL_BALANCE
+			message: 'All positions closed'
 		});
 	} catch (error) {
-		console.error('Error resetting paper trading positions:', error);
+		console.error('Error closing positions:', error);
 		return c.json({ error: 'Internal server error' }, 500);
 	}
 });

@@ -1,5 +1,5 @@
 {
-	"name": "ai-trader",
+	"name": "ta-trader",
 	"private": true,
 	"author": "Mario Reder <mario.reder@pm.me>",
 	"license": "MIT",
@@ -13,6 +13,7 @@
 		"format": "prettier --write ."
 	},
 	"dependencies": {
+		"@orderly.network/core": "^2.8.13",
 		"dayjs": "^1.11.19",
 		"hono": "^4.11.7",
 		"ts-pattern": "^5.9.0",

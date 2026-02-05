@@ -1,19 +1,13 @@
-import { FixedNumber } from '../FixedNumber';
-import { TRADING_CONFIG } from '../config';
 import { Position } from '../trading';
 import { EnvBindings } from '../types';
 
-import { PaperTradingAdapter } from './paper';
-import { RefFinanceAdapter } from './ref';
+import { OrderlyAdapter } from './orderly';
 
 export enum ExchangeType {
 	AMM = 'amm',
 	ORDERBOOK = 'orderbook',
 	HYBRID = 'hybrid'
 }
-
-// Supported adapter types
-export type AdapterType = 'ref' | 'paper';
 
 // Base market info shared by all types
 interface BaseMarketInfo {
@@ -183,6 +177,7 @@ export interface TradingAdapter {
 
 	// Position Management
 	getPosition(symbol: string): Promise<Position | null>;
+	getPositions(): Promise<Position[]>;
 
 	// Core Trading Operations
 	openLongPosition(symbol: string, size: number, options: TradeOptions): Promise<TradeResult>;
@@ -239,17 +234,6 @@ export interface TradingAdapter {
 	getFees?(symbol: string): Promise<Fees>;
 }
 
-// Re-export types that might be needed by adapters
-export type { FixedNumber };
-
-export function getAdapter(env: EnvBindings, adapterOverride?: AdapterType): TradingAdapter {
-	const adapterType = adapterOverride ?? TRADING_CONFIG.ADAPTER;
-	switch (adapterType) {
-		case 'ref':
-			return new RefFinanceAdapter(env);
-		case 'paper':
-			return new PaperTradingAdapter(env);
-		default:
-			throw new Error(`Unknown adapter type: ${adapterType}`);
-	}
+export function getAdapter(env: EnvBindings): TradingAdapter {
+	return new OrderlyAdapter(env);
 }

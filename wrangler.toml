@@ -1,5 +1,5 @@
 #:schema node_modules/wrangler/config-schema.json
-name = "ai-trader-api"
+name = "ta-trader-api"
 main = "src/index.ts"
 compatibility_date = "2025-01-11"
 compatibility_flags = ["nodejs_compat"]
@@ -10,19 +10,44 @@ enabled = true
 [placement]
 mode = "smart"
 
-[vars]
-NODE_URL = "https://rpc.shitzuapes.xyz"
-REF_CONTRACT_ID = "v2.ref-finance.near"
-ACCOUNT_ID = "aitrader.0xshitzu.near"
+# Environment variables are managed via:
+# - .dev.vars for local development
+# - wrangler secret for production secrets
+# - Cloudflare dashboard for production vars
+#
+# Required vars:
+# TAAPI_SECRET=your_taapi_api_key (use wrangler secret)
+# ORDERLY_NETWORK=testnet (or mainnet)
+# ORDERLY_ACCOUNT_ID=your_account_id
+# ORDERLY_PRIVATE_KEY=your_private_key (use wrangler secret)
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/5 * * * *", "* * * * *"]
 
-[[kv_namespaces]]
-binding = "KV"
-id = "0f16b792d035491e81094e8e118899ae"
+# Testnet environment
+[env.testnet]
+name = "ta-trader-api-testnet"
+vars = { ORDERLY_NETWORK = "testnet", ORDERLY_ACCOUNT_ID = "0x66079dcb0045e2b765a68cec1f39baed69c934df32b069144a75d45c8f597463" }
 
-[[d1_databases]]
-binding = "DB"
-database_name = "datapoints"
-database_id = "8d4ed4d1-93f0-47a4-8498-ef41edeff017"
+[[env.testnet.kv_namespaces]]
+binding = "ta_trader_logs_testnet"
+id = "e8344fc7d5804e2b8669c4033026b883"
+
+[[env.testnet.d1_databases]]
+binding = "ta_trader_testnet"
+database_name = "ta-trader-testnet"
+database_id = "da902492-c8fa-4ae6-aa26-fddadda1453e"
+
+# Production (mainnet) environment
+[env.production]
+name = "ta-trader-api"
+vars = { ORDERLY_NETWORK = "mainnet", ORDERLY_ACCOUNT_ID = "your_mainnet_account_id" }
+
+[[env.production.kv_namespaces]]
+binding = "ta_trader_logs_production"
+id = "a5188fd8cb484a0097ee1b84c96a7fc5"
+
+[[env.production.d1_databases]]
+binding = "ta_trader_production"
+database_name = "ta-trader-production"
+database_id = "f2e73543-ecd4-47d7-bfae-a35e069b10a7"
