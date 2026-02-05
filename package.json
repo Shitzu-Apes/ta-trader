@@ -13,7 +13,10 @@
 		"format": "prettier --write .",
 		"logs": "node scripts/monitor-logs.js",
 		"logs:testnet": "node scripts/monitor-logs.js --env testnet",
-		"logs:prod": "node scripts/monitor-logs.js --env production"
+		"logs:prod": "node scripts/monitor-logs.js --env production",
+		"market": "tsx scripts/api-market.js",
+		"market:testnet": "tsx scripts/api-market.js testnet",
+		"market:prod": "tsx scripts/api-market.js production"
 	},
 	"dependencies": {
 		"@orderly.network/core": "^2.8.13",

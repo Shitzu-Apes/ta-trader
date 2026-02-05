@@ -1,149 +1,13 @@
 import { ExchangeType, TradingAdapter } from './adapters';
 import { getTradingConfig, TRADING_CONFIG } from './config';
+import {
+	calculateObvScore,
+	calculateRsiScore,
+	calculateBBandsScore,
+	calculateVwapScore
+} from './indicators';
 import { getLogger, createContext } from './logger';
 import { EnvBindings } from './types';
-
-/**
- * Calculate slope using linear regression
- */
-function calculateSlope(values: number[], windowSize: number): number {
-	if (values.length < windowSize) {
-		return 0;
-	}
-
-	// Get the last window of values
-	const subset = values.slice(-windowSize);
-
-	// Calculate means
-	let sumX = 0;
-	let sumY = 0;
-	for (let i = 0; i < windowSize; i++) {
-		sumX += i;
-		sumY += subset[i];
-	}
-	const xMean = sumX / windowSize;
-	const yMean = sumY / windowSize;
-
-	// Calculate slope
-	let numerator = 0;
-	let denominator = 0;
-	for (let i = 0; i < windowSize; i++) {
-		const dx = i - xMean;
-		const dy = subset[i] - yMean;
-		numerator += dx * dy;
-		denominator += dx * dx;
-	}
-
-	return denominator !== 0 ? numerator / denominator : 0;
-}
-
-/**
- * Calculate RSI score between -1 and 1
- * - Negative: Oversold (bullish)
- * - Positive: Overbought (bearish)
- * Magnitude increases exponentially as RSI moves towards extremes
- */
-function calculateRsiScore(rsi: number): number {
-	// Center RSI around 50
-	const centered = rsi - 50;
-
-	// Normalize to -1 to 1 range and apply exponential scaling
-	// This makes the score change more rapidly at extremes
-	return -Math.sign(centered) * Math.pow(Math.abs(centered) / 50, 2);
-}
-
-/**
- * Calculate Bollinger Bands score between -1.5 and 1.5
- * - Negative: Price near upper band (bearish)
- * - Positive: Price near lower band (bullish)
- * - Zero: Price in the middle
- */
-function calculateBBandsScore(currentPrice: number, upperBand: number, lowerBand: number): number {
-	const middleBand = (upperBand + lowerBand) / 2;
-	const totalRange = upperBand - lowerBand;
-	const pricePosition = (currentPrice - middleBand) / (totalRange / 2);
-	return -pricePosition * TRADING_CONFIG.BBANDS_MULTIPLIER;
-}
-
-/**
- * Calculate VWAP score dynamically based on price difference
- * Returns a score where:
- * - Positive: VWAP above price (bullish)
- * - Negative: VWAP below price (bearish)
- * - Zero: Within threshold (±1%)
- *
- * Examples with VWAP_THRESHOLD = 0.01 (1%):
- * - VWAP 0.5% above price: score = 0 (within threshold)
- * - VWAP 2% above price: score = 1.0 (1% above threshold)
- * - VWAP 3% above price: score = 2.0 (2% above threshold)
- * - VWAP 2.5% below price: score = -1.5 (1.5% below threshold)
- */
-function calculateVwapScore(currentPrice: number, vwap: number): number {
-	const vwapDiff = (vwap - currentPrice) / currentPrice;
-
-	// Return 0 if within ±1% threshold
-	if (Math.abs(vwapDiff) <= TRADING_CONFIG.VWAP_THRESHOLD) {
-		return 0;
-	}
-
-	// Calculate how many additional percentage points above threshold
-	const additionalPercentage = Math.abs(vwapDiff) - TRADING_CONFIG.VWAP_THRESHOLD;
-	const score = additionalPercentage / TRADING_CONFIG.VWAP_THRESHOLD;
-
-	// Return positive score for bullish (VWAP above price), negative for bearish
-	return vwapDiff > 0 ? score : -score;
-}
-
-/**
- * Calculate divergence score between price and OBV slopes
- * Returns a score between -1 and 1:
- * - Negative: Bearish divergence (price up, OBV down)
- * - Positive: Bullish divergence (price down, OBV up)
- * - Magnitude indicates strength of divergence
- */
-function detectSlopeDivergence(priceSlope: number, obvSlope: number, threshold: number): number {
-	// If slopes are too small, no significant divergence
-	if (Math.abs(priceSlope) < threshold) {
-		return 0;
-	}
-
-	// Calculate how strongly the slopes diverge
-	const divergenceStrength =
-		(priceSlope * -obvSlope) / Math.max(Math.abs(priceSlope), Math.abs(obvSlope));
-
-	// Scale the strength by how much price slope exceeds threshold
-	const scaleFactor = Math.min(Math.abs(priceSlope) / threshold, 1);
-
-	return divergenceStrength * scaleFactor;
-}
-
-/**
- * Calculate OBV score based on divergence
- */
-function calculateObvScore(symbol: string, prices: number[], obvs: number[]): number {
-	// Calculate slopes
-	const priceSlope = calculateSlope(prices, TRADING_CONFIG.OBV_WINDOW_SIZE);
-	const obvSlope = calculateSlope(obvs, TRADING_CONFIG.OBV_WINDOW_SIZE);
-
-	// Normalize slopes
-	const maxPrice = Math.max(...prices.slice(-TRADING_CONFIG.OBV_WINDOW_SIZE));
-	const maxObv = Math.max(...obvs.slice(-TRADING_CONFIG.OBV_WINDOW_SIZE));
-	const normalizedPriceSlope = (priceSlope / maxPrice) * 1000;
-	const normalizedObvSlope = (obvSlope / maxObv) * 1000;
-
-	const logger = getLogger();
-	logger.debug('OBV analysis', createContext(symbol, 'obv_analysis'), {
-		priceSlope: normalizedPriceSlope,
-		obvSlope: normalizedObvSlope
-	});
-
-	// Calculate divergence score
-	return detectSlopeDivergence(
-		normalizedPriceSlope,
-		normalizedObvSlope,
-		TRADING_CONFIG.SLOPE_THRESHOLD
-	);
-}
 
 export type Position = {
 	symbol: string;
@@ -174,7 +38,7 @@ function calculateTaScore(
 	const vwapScore = calculateVwapScore(currentPrice, vwap);
 	const bbandsScore = calculateBBandsScore(currentPrice, bbandsUpper, bbandsLower);
 	const rsiScore = calculateRsiScore(rsi);
-	const obvScore = calculateObvScore(symbol, prices, obvs);
+	const obvScore = calculateObvScore(prices, obvs, symbol);
 
 	// Log individual scores
 	const logger = getLogger();
