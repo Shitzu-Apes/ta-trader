@@ -29,7 +29,8 @@ export function Navigation() {
 					<div className="hidden md:flex items-center space-x-1">
 						{navItems.map((item) => {
 							const Icon = item.icon;
-							const isActive = location.pathname === item.path;
+							const isActive =
+								location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
 							return (
 								<Link
 									key={item.path}
@@ -65,7 +66,8 @@ export function Navigation() {
 					<div className="px-2 pt-2 pb-3 space-y-1">
 						{navItems.map((item) => {
 							const Icon = item.icon;
-							const isActive = location.pathname === item.path;
+							const isActive =
+								location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
 							return (
 								<Link
 									key={item.path}

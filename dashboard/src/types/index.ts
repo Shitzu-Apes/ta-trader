@@ -62,7 +62,7 @@ export interface HistoricalData {
 
 export interface Signal {
 	timestamp: number;
-	type: 'ENTRY' | 'EXIT' | 'HOLD' | 'NO_ACTION';
+	type: 'ENTRY' | 'EXIT' | 'ADJUSTMENT' | 'HOLD' | 'NO_ACTION';
 	direction: 'LONG' | 'SHORT';
 	action: string;
 	reason: string;

@@ -10,6 +10,7 @@ export function SignalBadge({ signal }: SignalBadgeProps) {
 	const typeColors = {
 		ENTRY: 'bg-success/10 text-success border-success/20',
 		EXIT: 'bg-danger/10 text-danger border-danger/20',
+		ADJUSTMENT: 'bg-info/10 text-info border-info/20',
 		HOLD: 'bg-warning/10 text-warning border-warning/20',
 		NO_ACTION: 'bg-text-muted/10 text-text-muted border-text-muted/20'
 	};

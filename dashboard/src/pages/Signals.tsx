@@ -21,6 +21,7 @@ export function Signals() {
 		{ value: 'ALL', label: 'All' },
 		{ value: 'ENTRY', label: 'Entry' },
 		{ value: 'EXIT', label: 'Exit' },
+		{ value: 'ADJUSTMENT', label: 'Adjustment' },
 		{ value: 'HOLD', label: 'Hold' },
 		{ value: 'NO_ACTION', label: 'No Action' }
 	];
