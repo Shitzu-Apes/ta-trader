@@ -1,18 +1,22 @@
 {
 	"name": "ai-trader",
 	"private": true,
-	"workspaces": [
-		"api",
-		"binance-api"
-	],
 	"author": "Mario Reder <mario.reder@pm.me>",
 	"license": "MIT",
 	"type": "module",
 	"scripts": {
-		"api": "yarn workspace ai-trader-api",
-		"binance-api": "yarn workspace binance-api",
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"cf-typegen": "wrangler types",
 		"lint": "eslint --max-warnings=0 . && prettier --check .",
 		"format": "prettier --write ."
+	},
+	"dependencies": {
+		"dayjs": "^1.11.19",
+		"hono": "^4.11.7",
+		"ts-pattern": "^5.9.0",
+		"zod": "^4.3.6"
 	},
 	"devDependencies": {
 		"@cloudflare/workers-types": "^4.20260205.0",
