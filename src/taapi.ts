@@ -1,5 +1,5 @@
 import { getAdapter } from './adapters';
-import { ORDERLY_TO_TAAPI_MAP, TAAPI_CONFIG, TRADING_CONFIG } from './config';
+import { ORDERLY_TO_TAAPI_MAP, PerpSymbol, TAAPI_CONFIG, TRADING_CONFIG } from './config';
 import { getCurrentTimeframe } from './datapoints';
 import { getLogger, createContext } from './logger';
 import { analyzeForecast } from './trading';
@@ -62,10 +62,36 @@ async function storeDatapoint(
 	await stmt.bind(symbol, indicator, timestamp, JSON.stringify(data)).run();
 }
 
-// Fetch and store technical indicators from TAAPI
-export async function fetchTaapiIndicators(orderlySymbol: string, env: EnvBindings) {
+// Store indicators to D1 database
+async function storeIndicators(
+	env: EnvBindings,
+	symbol: string,
+	timestamp: number,
+	indicators: BulkResponse['data']
+) {
 	const logger = getLogger(env);
-	const ctx = createContext(orderlySymbol, 'fetch_indicators');
+	const ctx = createContext(symbol, 'store_indicators');
+
+	const storePromises = indicators.map(async (item) => {
+		logger.debug(`Storing indicator: ${item.id}`, ctx, { value: item.result });
+		await storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
+	});
+
+	await Promise.all(storePromises);
+
+	logger.info('Successfully stored all indicators', ctx, {
+		indicatorsCount: indicators.length,
+		timestamp
+	});
+}
+
+// Fetch indicators from TAAPI without storing (returns raw data)
+export async function fetchTaapiIndicatorsRaw(
+	orderlySymbol: PerpSymbol,
+	env: EnvBindings
+): Promise<{ indicators: BulkResponse['data']; timestamp: number }> {
+	const logger = getLogger(env);
+	const ctx = createContext(orderlySymbol, 'fetch_indicators_raw');
 	const now = getCurrentTimeframe();
 	const timestamp = now.valueOf();
 
@@ -112,22 +138,17 @@ export async function fetchTaapiIndicators(orderlySymbol: string, env: EnvBindin
 
 		logger.info(`Received ${bulkData.length} indicators from TAAPI`, ctx);
 
-		// Store each indicator using Orderly symbol
-		const storePromises = bulkData.map(async (item) => {
-			logger.debug(`Storing indicator: ${item.id}`, ctx, { value: item.result });
-			await storeDatapoint(env.DB, orderlySymbol, item.id, timestamp, item.result);
-		});
-
-		await Promise.all(storePromises);
-
-		logger.info('Successfully stored all indicators', ctx, {
-			indicatorsCount: bulkData.length,
-			timestamp
-		});
+		return { indicators: bulkData, timestamp };
 	} catch (error) {
-		logger.error('Failed to fetch/store indicators', error as Error, ctx);
+		logger.error('Failed to fetch indicators', error as Error, ctx);
 		throw error;
 	}
+}
+
+// Fetch and store technical indicators from TAAPI (original behavior for 5min cron)
+export async function fetchTaapiIndicators(orderlySymbol: PerpSymbol, env: EnvBindings) {
+	const { indicators, timestamp } = await fetchTaapiIndicatorsRaw(orderlySymbol, env);
+	await storeIndicators(env, orderlySymbol, timestamp, indicators);
 }
 
 export async function fetchHistoricalData(db: D1Database, symbol: string, env?: EnvBindings) {

@@ -1,0 +1,113 @@
+export interface Config {
+	environment: 'testnet' | 'production';
+	activeSymbols: string[];
+	version: string;
+}
+
+export interface Balance {
+	balance: number;
+	currency: string;
+}
+
+export interface Position {
+	symbol: string;
+	isLong: boolean;
+	size: number;
+	entryPrice: number;
+	markPrice: number;
+	unrealizedPnl: number;
+	realizedPnl: number;
+	lastUpdateTime: number;
+}
+
+export interface Portfolio {
+	balance: number;
+	positions: Position[];
+}
+
+export interface IndicatorData {
+	candle?: {
+		open: number;
+		high: number;
+		low: number;
+		close: number;
+		volume: number;
+	};
+	rsi?: { value: number };
+	vwap?: { value: number };
+	bbands?: {
+		valueUpperBand: number;
+		valueMiddleBand: number;
+		valueLowerBand: number;
+	};
+	obv?: { value: number };
+	atr?: { value: number };
+}
+
+export interface LatestData {
+	symbol: string;
+	timestamp: number;
+	indicators: IndicatorData;
+}
+
+export interface HistoricalDataPoint {
+	timestamp: number;
+	indicators: IndicatorData;
+}
+
+export interface HistoricalData {
+	symbol: string;
+	data: HistoricalDataPoint[];
+}
+
+export interface Signal {
+	timestamp: number;
+	type: 'ENTRY' | 'EXIT' | 'HOLD' | 'NO_ACTION';
+	direction: 'LONG' | 'SHORT';
+	action: string;
+	reason: string;
+	taScore: number;
+	threshold: number;
+	price: number;
+	positionSize: number;
+	entryPrice: number;
+	unrealizedPnl: number;
+	realizedPnl: number;
+	indicators: {
+		vwap: number;
+		bbands: number;
+		rsi: number;
+		obv: number;
+		total: number;
+	};
+}
+
+export interface SignalsData {
+	symbol: string;
+	count: number;
+	signals: Signal[];
+}
+
+export interface LogEntry {
+	key: string;
+	data: {
+		timestamp: string;
+		level: 'ERROR' | 'WARN' | 'INFO' | 'DEBUG';
+		message: string;
+		context?: {
+			operation?: string;
+			symbol?: string;
+			[key: string]: unknown;
+		};
+		error?: {
+			message: string;
+			[key: string]: unknown;
+		};
+	};
+	expiration?: number;
+}
+
+export interface LogsData {
+	count: number;
+	logs: LogEntry[];
+}

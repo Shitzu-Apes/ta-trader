@@ -10,6 +10,10 @@ enabled = true
 [placement]
 mode = "smart"
 
+# Static assets for dashboard
+[assets]
+directory = "./dashboard/dist"
+
 # Environment variables are managed via:
 # - .dev.vars for local development
 # - wrangler secret for production secrets

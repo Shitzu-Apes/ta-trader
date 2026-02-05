@@ -486,6 +486,112 @@ export async function checkAndClosePositions(
 }
 
 /**
+ * Check for signal reversal using fresh TA indicators (in-memory, not stored)
+ * Used by 1-minute cron to check if open positions should be closed due to signal reversal
+ */
+export async function checkSignalReversal(
+	adapter: TradingAdapter,
+	env: EnvBindings,
+	symbol: string,
+	currentPrice: number,
+	vwap: number,
+	bbandsUpper: number,
+	bbandsLower: number,
+	rsi: number,
+	prices: number[],
+	obvs: number[]
+): Promise<void> {
+	const logger = getLogger();
+	const ctx = createContext(symbol, 'check_signal_reversal');
+
+	logger.debug('Checking for signal reversal with fresh indicators', ctx);
+
+	try {
+		// Get current position from Orderly
+		const currentPosition = await adapter.getPosition(symbol);
+
+		if (!currentPosition) {
+			logger.debug('No active position to check for reversal', ctx);
+			return;
+		}
+
+		// Get actual price from adapter
+		const actualPrice = await getActualPrice(adapter, symbol);
+		if (!actualPrice) {
+			logger.error('Failed to get actual price for reversal check', undefined, ctx);
+			return;
+		}
+
+		const position = currentPosition;
+
+		// Calculate TA score using fresh indicators
+		const taScoreResult = calculateTaScore(
+			symbol,
+			actualPrice,
+			vwap,
+			bbandsUpper,
+			bbandsLower,
+			rsi,
+			prices,
+			obvs
+		);
+		const taScore = taScoreResult.score;
+
+		logger.info('TA Score calculated for reversal check', ctx, {
+			taScore,
+			isLong: position.isLong
+		});
+
+		// Get thresholds based on position direction
+		const thresholds = position.isLong
+			? TRADING_CONFIG.POSITION_THRESHOLDS.long
+			: TRADING_CONFIG.POSITION_THRESHOLDS.short;
+
+		// Check if signal reversed (score opposite to position direction)
+		const shouldClose = position.isLong ? taScore < thresholds.sell : taScore > thresholds.sell;
+
+		if (shouldClose) {
+			logger.info('Signal reversal triggered', ctx, {
+				taScore,
+				threshold: thresholds.sell,
+				isLong: position.isLong
+			});
+
+			// Store exit signal
+			const exitSignal: TradingSignal = {
+				symbol,
+				timestamp: Date.now(),
+				type: 'EXIT',
+				action: 'CLOSE',
+				direction: position.isLong ? 'LONG' : 'SHORT',
+				reason: 'SIGNAL_REVERSAL',
+				taScore,
+				threshold: thresholds.sell,
+				price: actualPrice,
+				positionSize: position.size,
+				entryPrice: position.entryPrice,
+				unrealizedPnl: position.unrealizedPnl,
+				realizedPnl: position.realizedPnl,
+				indicators: taScoreResult.indicators
+			};
+			await storeSignal(env, exitSignal);
+
+			await closePosition(adapter, symbol, position);
+			return;
+		}
+
+		logger.info('No signal reversal detected, holding position', ctx, {
+			taScore,
+			threshold: thresholds.sell,
+			isLong: position.isLong
+		});
+	} catch (error) {
+		logger.error('Error checking signal reversal', error as Error, ctx);
+		throw error;
+	}
+}
+
+/**
  * Close a position
  */
 async function closePosition(

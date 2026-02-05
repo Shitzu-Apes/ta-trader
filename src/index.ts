@@ -9,12 +9,27 @@ import { poweredBy } from 'hono/powered-by';
 import type { HTTPResponseError } from 'hono/types';
 
 import { getAdapter } from './adapters';
-import { getTradingConfig, HTTP_CONFIG } from './config';
+import { getTradingConfig, HTTP_CONFIG, PerpSymbol } from './config';
 import datapoints from './datapoints';
 import { getLogger, resetLogger, createContext, withTiming } from './logger';
-import { updateIndicators, analyzeMarketData } from './taapi';
-import { checkAndClosePositions } from './trading';
+import { updateIndicators, analyzeMarketData, fetchTaapiIndicatorsRaw, Indicators } from './taapi';
+import { checkAndClosePositions, checkSignalReversal } from './trading';
 import { EnvBindings } from './types';
+
+// Check if current time is within 30 seconds of a 5-minute boundary
+// Returns true if we should skip the 1-minute cron (to avoid collision with 5-minute cron)
+function shouldSkip1MinCron(): boolean {
+	const now = Date.now();
+	const seconds = Math.floor(now / 1000) % 60;
+	const minute = Math.floor(now / 1000 / 60) % 5;
+
+	// Check if we're in the danger zone: >4:30 or <0:30 of any 5-minute block
+	// minute 4 with seconds > 30, OR minute 0 with seconds < 30
+	if (minute === 4 && seconds > 30) return true;
+	if (minute === 0 && seconds < 30) return true;
+
+	return false;
+}
 
 dayjs.extend(duration);
 dayjs.extend(relativeTime);
@@ -23,7 +38,18 @@ dayjs.extend(utc);
 
 const app = new Hono<Env>();
 
+// API routes
 app.route('/api', datapoints);
+
+// Config endpoint for dashboard
+app.get('/api/config', (c) => {
+	const config = getTradingConfig(c.env as EnvBindings);
+	return c.json({
+		environment: (c.env as EnvBindings).ORDERLY_NETWORK === 'mainnet' ? 'production' : 'testnet',
+		activeSymbols: config.ACTIVE_SYMBOLS,
+		version: '1.0.0'
+	});
+});
 
 app.use('*', poweredBy());
 app.use(
@@ -120,16 +146,101 @@ async function monitorPositions(env: EnvBindings) {
 			symbols: activeSymbols
 		});
 
-		// Check positions for all active symbols
+		// First, check which symbols have open positions and close SL/TP
+		const symbolsWithPositions: PerpSymbol[] = [];
 		await Promise.all(
-			activeSymbols.map((symbol) =>
-				withTiming(
-					logger,
-					'check_positions',
-					() => checkAndClosePositions(adapter, env, symbol),
-					createContext(symbol, 'position_check')
-				)
-			)
+			activeSymbols.map(async (symbol) => {
+				const position = await adapter.getPosition(symbol);
+				if (position) {
+					symbolsWithPositions.push(symbol);
+					// Check SL/TP immediately
+					await withTiming(
+						logger,
+						'check_positions',
+						() => checkAndClosePositions(adapter, env, symbol),
+						createContext(symbol, 'position_check')
+					);
+				}
+			})
+		);
+
+		// If no positions open, nothing more to do
+		if (symbolsWithPositions.length === 0) {
+			logger.info('No open positions to monitor for signal reversal', ctx);
+			return;
+		}
+
+		logger.info(
+			`Found ${symbolsWithPositions.length} open positions, fetching fresh indicators for signal reversal check`,
+			ctx,
+			{
+				symbols: symbolsWithPositions
+			}
+		);
+
+		// Fetch fresh TA indicators for symbols with open positions (in-memory only)
+		const indicatorResults = await Promise.allSettled(
+			symbolsWithPositions.map(async (symbol) => {
+				try {
+					const { indicators } = await fetchTaapiIndicatorsRaw(symbol, env);
+
+					// Parse indicators into the format needed for analysis
+					const indicatorMap = new Map(indicators.map((item) => [item.id, item.result]));
+
+					const candle = indicatorMap.get('candle') as Indicators['candle'] | undefined;
+					const vwap = indicatorMap.get('vwap') as Indicators['vwap'] | undefined;
+					const bbands = indicatorMap.get('bbands') as Indicators['bbands'] | undefined;
+					const rsi = indicatorMap.get('rsi') as Indicators['rsi'] | undefined;
+					const obv = indicatorMap.get('obv') as Indicators['obv'] | undefined;
+
+					return {
+						symbol,
+						currentPrice: candle?.close ?? 0,
+						vwap: vwap?.value ?? 0,
+						bbandsUpper: bbands?.valueUpperBand ?? 0,
+						bbandsLower: bbands?.valueLowerBand ?? 0,
+						rsi: rsi?.value ?? 0,
+						obv: obv?.value ?? 0
+					};
+				} catch (error) {
+					logger.error(`Failed to fetch indicators for ${symbol}`, error as Error, {
+						...ctx,
+						symbol
+					});
+					return null;
+				}
+			})
+		);
+
+		// Check signal reversal for each symbol that successfully fetched indicators
+		await Promise.all(
+			indicatorResults.map(async (result) => {
+				if (result.status === 'fulfilled' && result.value) {
+					const { symbol, currentPrice, vwap, bbandsUpper, bbandsLower, rsi, obv } = result.value;
+
+					// For signal reversal, we need historical data (prices and OBVs)
+					// Since we only have current values from fresh fetch, we'll use a simplified approach
+					// Just pass current values as arrays (signal reversal calculation will work with single values)
+					await withTiming(
+						logger,
+						'check_signal_reversal',
+						() =>
+							checkSignalReversal(
+								adapter,
+								env,
+								symbol,
+								currentPrice,
+								vwap,
+								bbandsUpper,
+								bbandsLower,
+								rsi,
+								[currentPrice], // Single price point
+								[obv] // Single OBV point
+							),
+						createContext(symbol, 'signal_reversal_check')
+					);
+				}
+			})
 		);
 
 		logger.info('Completed position monitoring', ctx);
@@ -152,6 +263,17 @@ export default {
 				ctx.waitUntil(updateIndicatorsAndTrade(env));
 				break;
 			case '* * * * *':
+				// Skip 1-minute cron if too close to 5-minute boundary to avoid collision
+				if (shouldSkip1MinCron()) {
+					const logger = getLogger(env);
+					logger.info(
+						'Skipping 1-minute cron - too close to 5-minute boundary',
+						createContext(undefined, 'cron_skip')
+					);
+					await logger.flushNow();
+					resetLogger();
+					return;
+				}
 				ctx.waitUntil(monitorPositions(env));
 				break;
 		}

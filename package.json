@@ -5,8 +5,9 @@
 	"license": "MIT",
 	"type": "module",
 	"scripts": {
-		"deploy": "wrangler deploy",
-		"dev": "wrangler dev",
+		"deploy": "yarn dashboard:build && wrangler deploy",
+		"deploy:testnet": "yarn dashboard:build && wrangler deploy --env testnet",
+		"dev": "concurrently \"yarn dashboard:build && yarn dashboard:watch\" \"wrangler dev\"",
 		"start": "wrangler dev",
 		"cf-typegen": "wrangler types",
 		"lint": "eslint --max-warnings=0 . && prettier --check .",
@@ -22,7 +23,10 @@
 		"market:prod": "tsx scripts/api-market.js production",
 		"signals": "node scripts/investigate-signals.js",
 		"signals:testnet": "node scripts/investigate-signals.js testnet",
-		"signals:prod": "node scripts/investigate-signals.js production"
+		"signals:prod": "node scripts/investigate-signals.js production",
+		"dashboard:dev": "cd dashboard && yarn dev",
+		"dashboard:build": "cd dashboard && yarn build",
+		"dashboard:watch": "cd dashboard && yarn build --watch"
 	},
 	"dependencies": {
 		"@orderly.network/core": "^2.8.13",
@@ -37,6 +41,7 @@
 		"@eslint/js": "^9.39.2",
 		"@typescript-eslint/eslint-plugin": "^8.54.0",
 		"@typescript-eslint/parser": "^8.54.0",
+		"concurrently": "^9.1.2",
 		"dotenv": "^17.2.3",
 		"eslint": "^9.39.2",
 		"eslint-config-prettier": "^10.1.8",
