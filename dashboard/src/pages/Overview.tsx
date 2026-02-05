@@ -1,4 +1,5 @@
 import { Wallet, TrendingUp, AlertCircle, Activity } from 'lucide-react';
+
 import { StatCard } from '@/components/StatCard';
 import { usePortfolio, useConfig, useLogs } from '@/hooks/useApi';
 

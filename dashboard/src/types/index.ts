@@ -111,3 +111,26 @@ export interface LogsData {
 	count: number;
 	logs: LogEntry[];
 }
+
+export interface PositionHistory {
+	symbol: string;
+	side: 'LONG' | 'SHORT';
+	size: number;
+	entryPrice: number;
+	exitPrice: number;
+	realizedPnl: number;
+	openedAt: number;
+	closedAt: number;
+}
+
+export interface PositionHistoryResponse {
+	history: PositionHistory[];
+	pagination: {
+		page: number;
+		limit: number;
+		total: number;
+		totalPages: number;
+		hasNext: boolean;
+		hasPrev: boolean;
+	};
+}

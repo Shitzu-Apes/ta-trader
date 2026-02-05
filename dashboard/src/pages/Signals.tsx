@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useConfig, useSignals } from '@/hooks/useApi';
+
 import { SignalBadge } from '@/components/SignalBadge';
+import { useConfig, useSignals } from '@/hooks/useApi';
 import type { Signal } from '@/types';
 
 export function Signals() {

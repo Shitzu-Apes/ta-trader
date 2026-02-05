@@ -6,7 +6,8 @@ import type {
 	LatestData,
 	HistoricalData,
 	SignalsData,
-	LogsData
+	LogsData,
+	PositionHistoryResponse
 } from '@/types';
 
 const API_BASE = '';
@@ -33,5 +34,9 @@ export const api = {
 		fetchJson<{ symbol: string; signal: SignalsData['signals'][0] }>(
 			`${API_BASE}/api/signals/${symbol}/latest`
 		),
-	getLogs: (limit = 100) => fetchJson<LogsData>(`${API_BASE}/api/logs?limit=${limit}`)
+	getLogs: (limit = 100) => fetchJson<LogsData>(`${API_BASE}/api/logs?limit=${limit}`),
+	getPositionHistory: (page = 1, limit = 10) =>
+		fetchJson<PositionHistoryResponse>(
+			`${API_BASE}/api/position-history?page=${page}&limit=${limit}`
+		)
 };

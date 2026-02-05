@@ -1,4 +1,5 @@
 import { useState } from 'react';
+
 import { useConfig, useLatestData, useLatestSignal } from '@/hooks/useApi';
 
 export function Market() {
@@ -22,12 +23,12 @@ export function Market() {
 		return { label: 'STRONG SELL', color: 'bg-danger text-white' };
 	};
 
-	const formatNumber = (num: number | undefined, decimals = 2) => {
+	const formatNumber = (num: number | null | undefined, decimals = 2) => {
 		if (num === undefined || num === null) return '-';
-		return num.toLocaleString('en-US', {
+		return new Intl.NumberFormat('en-US', {
 			minimumFractionDigits: decimals,
 			maximumFractionDigits: decimals
-		});
+		}).format(num);
 	};
 
 	return (
@@ -62,18 +63,26 @@ export function Market() {
 						<div className="card">
 							<p className="text-sm text-text-muted mb-2">Current Price</p>
 							<p className="text-4xl font-bold text-text">
-								${formatNumber(indicators?.candle?.close)}
+								${formatNumber(indicators?.candle?.close ?? undefined)}
 							</p>
 							<div className="mt-2 flex items-center gap-4 text-sm">
 								<span className="text-text-muted">
-									High: <span className="text-text">${formatNumber(indicators?.candle?.high)}</span>
+									High:{' '}
+									<span className="text-text">
+										${formatNumber(indicators?.candle?.high ?? undefined)}
+									</span>
 								</span>
 								<span className="text-text-muted">
-									Low: <span className="text-text">${formatNumber(indicators?.candle?.low)}</span>
+									Low:{' '}
+									<span className="text-text">
+										${formatNumber(indicators?.candle?.low ?? undefined)}
+									</span>
 								</span>
 								<span className="text-text-muted">
 									Vol:{' '}
-									<span className="text-text">{formatNumber(indicators?.candle?.volume, 0)}</span>
+									<span className="text-text">
+										{formatNumber(indicators?.candle?.volume ?? undefined, 0)}
+									</span>
 								</span>
 							</div>
 						</div>
@@ -117,7 +126,9 @@ export function Market() {
 								<tbody>
 									<tr className="border-b border-border">
 										<td className="py-3 px-4 text-text font-medium">RSI</td>
-										<td className="py-3 px-4 text-text">{formatNumber(indicators?.rsi?.value)}</td>
+										<td className="py-3 px-4 text-text">
+											{formatNumber(indicators?.rsi?.value ?? undefined)}
+										</td>
 										<td className="py-3 px-4">
 											<span
 												className={`text-sm ${
@@ -138,13 +149,15 @@ export function Market() {
 									</tr>
 									<tr className="border-b border-border">
 										<td className="py-3 px-4 text-text font-medium">VWAP</td>
-										<td className="py-3 px-4 text-text">{formatNumber(indicators?.vwap?.value)}</td>
+										<td className="py-3 px-4 text-text">
+											{formatNumber(indicators?.vwap?.value ?? undefined)}
+										</td>
 										<td className="py-3 px-4">
 											<span
 												className={`text-sm ${
 													(indicators?.candle?.close || 0) > (indicators?.vwap?.value || 0)
-														? 'text-success'
-														: 'text-danger'
+														? 'text-danger'
+														: 'text-success'
 												}`}
 											>
 												{(indicators?.candle?.close || 0) > (indicators?.vwap?.value || 0)
@@ -156,9 +169,9 @@ export function Market() {
 									<tr className="border-b border-border">
 										<td className="py-3 px-4 text-text font-medium">Bollinger Bands</td>
 										<td className="py-3 px-4 text-text">
-											U: {formatNumber(indicators?.bbands?.valueUpperBand)} | M:{' '}
-											{formatNumber(indicators?.bbands?.valueMiddleBand)} | L:{' '}
-											{formatNumber(indicators?.bbands?.valueLowerBand)}
+											U: {formatNumber(indicators?.bbands?.valueUpperBand ?? undefined)} | M:{' '}
+											{formatNumber(indicators?.bbands?.valueMiddleBand ?? undefined)} | L:{' '}
+											{formatNumber(indicators?.bbands?.valueLowerBand ?? undefined)}
 										</td>
 										<td className="py-3 px-4">
 											<span
@@ -185,7 +198,7 @@ export function Market() {
 									<tr className="border-b border-border">
 										<td className="py-3 px-4 text-text font-medium">OBV</td>
 										<td className="py-3 px-4 text-text">
-											{formatNumber(indicators?.obv?.value, 0)}
+											{formatNumber(indicators?.obv?.value ?? undefined, 0)}
 										</td>
 										<td className="py-3 px-4">
 											<span className="text-sm text-text-muted">Volume momentum</span>
@@ -193,7 +206,9 @@ export function Market() {
 									</tr>
 									<tr>
 										<td className="py-3 px-4 text-text font-medium">ATR</td>
-										<td className="py-3 px-4 text-text">{formatNumber(indicators?.atr?.value)}</td>
+										<td className="py-3 px-4 text-text">
+											{formatNumber(indicators?.atr?.value ?? undefined)}
+										</td>
 										<td className="py-3 px-4">
 											<span className="text-sm text-text-muted">Volatility measure</span>
 										</td>

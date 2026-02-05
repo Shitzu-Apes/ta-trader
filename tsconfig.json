@@ -10,7 +10,11 @@
 		"skipLibCheck": true,
 		"sourceMap": true,
 		"strict": true,
-		"types": ["@cloudflare/workers-types"]
+		"types": ["@cloudflare/workers-types"],
+		"baseUrl": ".",
+		"paths": {
+			"@/*": ["./dashboard/src/*"]
+		}
 	},
 	"include": ["./**/*.ts"]
 }

@@ -9,6 +9,9 @@ import globals from 'globals';
 export default [
 	js.configs.recommended,
 	{
+		ignores: ['**/dist/**', '**/node_modules/**', '**/.wrangler/**']
+	},
+	{
 		files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
 		languageOptions: {
 			parser: tsParser,

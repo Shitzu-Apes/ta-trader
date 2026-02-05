@@ -113,17 +113,44 @@ app.get('/latest/:symbol', async (c) => {
 	const timestamp = date.valueOf();
 
 	try {
+		// First try to get data for the current timeframe
 		const stmt = c.env.DB.prepare('SELECT * FROM datapoints WHERE symbol = ? AND timestamp = ?');
 		const results = await stmt.bind(symbol, timestamp).all<DataPoint>();
 
-		if (!results.results?.length) {
+		if (results.results?.length) {
+			return c.json({
+				symbol,
+				timestamp,
+				indicators: results.results.reduce(
+					(acc, row) => {
+						acc[row.indicator] = JSON.parse(row.data);
+						return acc;
+					},
+					{} as Record<string, unknown>
+				)
+			});
+		}
+
+		// Fallback: get the most recent data regardless of timeframe
+		const fallbackStmt = c.env.DB.prepare(
+			`SELECT * FROM datapoints 
+			 WHERE symbol = ? 
+			 AND timestamp = (
+				 SELECT MAX(timestamp) FROM datapoints WHERE symbol = ?
+			 )`
+		);
+		const fallbackResults = await fallbackStmt.bind(symbol, symbol).all<DataPoint>();
+
+		if (!fallbackResults.results?.length) {
 			return c.json({ error: 'No data found' }, 404);
 		}
 
+		const fallbackTimestamp = fallbackResults.results[0].timestamp;
+
 		return c.json({
 			symbol,
-			timestamp,
-			indicators: results.results.reduce(
+			timestamp: fallbackTimestamp,
+			indicators: fallbackResults.results.reduce(
 				(acc, row) => {
 					acc[row.indicator] = JSON.parse(row.data);
 					return acc;
@@ -285,6 +312,63 @@ app.get('/positions', async (c) => {
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		console.error('Error getting positions:', errorMessage);
+		return c.json({ error: 'Internal server error', details: errorMessage }, 500);
+	}
+});
+
+// Get position history with pagination
+app.get('/position-history', async (c) => {
+	try {
+		const adapter = getAdapter(c.env);
+
+		// Parse pagination params
+		const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
+		const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') ?? '10', 10)));
+
+		// Get symbol filter (optional)
+		const symbol = c.req.query('symbol') ?? undefined;
+
+		// Fetch more items than needed to support pagination
+		// Orderly API returns most recent first
+		const fetchLimit = page * limit;
+		const result = await adapter.getPositionHistory?.(symbol, fetchLimit);
+
+		if (!result) {
+			return c.json({
+				history: [],
+				pagination: {
+					page,
+					limit,
+					total: 0,
+					totalPages: 0,
+					hasNext: false,
+					hasPrev: false
+				}
+			});
+		}
+
+		const { history, total } = result;
+
+		// Calculate pagination
+		const totalPages = Math.ceil(total / limit);
+		const startIndex = (page - 1) * limit;
+		const endIndex = startIndex + limit;
+		const paginatedHistory = history.slice(startIndex, endIndex);
+
+		return c.json({
+			history: paginatedHistory,
+			pagination: {
+				page,
+				limit,
+				total,
+				totalPages,
+				hasNext: page < totalPages,
+				hasPrev: page > 1
+			}
+		});
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		console.error('Error getting position history:', errorMessage);
 		return c.json({ error: 'Internal server error', details: errorMessage }, 500);
 	}
 });

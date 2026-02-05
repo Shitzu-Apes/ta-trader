@@ -179,6 +179,22 @@ export interface TradingAdapter {
 	// Position Management
 	getPosition(symbol: string): Promise<Position | null>;
 	getPositions(): Promise<Position[]>;
+	getPositionHistory?(
+		symbol?: string,
+		limit?: number
+	): Promise<{
+		history: Array<{
+			symbol: string;
+			side: 'LONG' | 'SHORT';
+			size: number;
+			entryPrice: number;
+			exitPrice: number;
+			realizedPnl: number;
+			openedAt: number;
+			closedAt: number;
+		}>;
+		total: number;
+	}>;
 
 	// Core Trading Operations
 	openLongPosition(symbol: string, size: number, options: TradeOptions): Promise<TradeResult>;

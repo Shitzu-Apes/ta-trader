@@ -36,6 +36,29 @@ interface OrderlyPosition {
 	timestamp?: number; // Position open/update timestamp from Orderly
 }
 
+// Orderly position history response type (from /v1/position_history)
+interface OrderlyPositionHistory {
+	position_id: number;
+	status: string;
+	type: string;
+	symbol: string;
+	avg_open_price: number;
+	avg_close_price: number;
+	max_position_qty: number;
+	closed_position_qty: number;
+	side: 'LONG' | 'SHORT';
+	trading_fee: number;
+	accumulated_funding_fee: number;
+	insurance_fund_fee: number;
+	liquidator_fee: number;
+	liquidation_id: number | null;
+	realized_pnl: number;
+	open_timestamp: number;
+	close_timestamp: number;
+	last_update_timestamp: number;
+	leverage: number;
+}
+
 interface OrderlyHolding {
 	token: string;
 	holding: number;
@@ -253,6 +276,71 @@ export class OrderlyAdapter implements TradingAdapter {
 		}
 
 		return positions;
+	}
+
+	async getPositionHistory(
+		symbol?: string,
+		limit = 50
+	): Promise<{
+		history: Array<{
+			symbol: string;
+			side: 'LONG' | 'SHORT';
+			size: number;
+			entryPrice: number;
+			exitPrice: number;
+			realizedPnl: number;
+			openedAt: number;
+			closedAt: number;
+		}>;
+		total: number;
+	}> {
+		const logger = getLogger(this.env);
+		const ctx = createContext(symbol || 'all', 'get_position_history');
+
+		try {
+			// Build query params
+			const params = new URLSearchParams();
+			if (symbol) {
+				params.append('symbol', symbol);
+			}
+			params.append('limit', limit.toString());
+
+			const path = `/v1/position_history?${params.toString()}`;
+
+			const response = await makeOrderlyRequest<{
+				success: boolean;
+				data?: { rows?: OrderlyPositionHistory[] };
+			}>(this.env, 'GET', path);
+
+			if (!response.success || !response.data?.rows) {
+				logger.warn('No position history data returned', ctx);
+				return { history: [], total: 0 };
+			}
+
+			const history = response.data.rows.map((pos) => ({
+				symbol: pos.symbol,
+				side: pos.side,
+				size: pos.closed_position_qty,
+				entryPrice: pos.avg_open_price,
+				exitPrice: pos.avg_close_price,
+				realizedPnl: pos.realized_pnl,
+				openedAt: pos.open_timestamp,
+				closedAt: pos.close_timestamp
+			}));
+
+			logger.info('Position history retrieved', ctx, {
+				count: history.length,
+				total: response.data.rows.length
+			});
+
+			return {
+				history,
+				total: response.data.rows.length
+			};
+		} catch (error) {
+			logger.error('Failed to get position history', error as Error, ctx);
+			throw error;
+		}
 	}
 
 	async openLongPosition(

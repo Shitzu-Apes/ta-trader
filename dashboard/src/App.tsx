@@ -1,10 +1,11 @@
 import { Routes, Route } from 'react-router-dom';
+
 import { Layout } from '@/components/Layout';
+import { Logs } from '@/pages/Logs';
+import { Market } from '@/pages/Market';
 import { Overview } from '@/pages/Overview';
 import { Positions } from '@/pages/Positions';
-import { Market } from '@/pages/Market';
 import { Signals } from '@/pages/Signals';
-import { Logs } from '@/pages/Logs';
 
 function App() {
 	return (

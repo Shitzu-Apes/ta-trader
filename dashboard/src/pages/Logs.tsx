@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useLogs } from '@/hooks/useApi';
+
 import { LogEntryComponent } from '@/components/LogEntry';
+import { useLogs } from '@/hooks/useApi';
 import type { LogEntry } from '@/types';
 
 export function Logs() {

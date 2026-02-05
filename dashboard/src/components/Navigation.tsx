@@ -1,6 +1,6 @@
+import { LayoutDashboard, TrendingUp, BarChart3, Activity, FileText, Menu, X } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, TrendingUp, BarChart3, Activity, FileText, Menu, X } from 'lucide-react';
 
 const navItems = [
 	{ path: '/', label: 'Overview', icon: LayoutDashboard },

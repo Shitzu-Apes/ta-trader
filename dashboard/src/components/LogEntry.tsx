@@ -1,6 +1,8 @@
-import type { LogEntry } from '@/types';
-import { useState } from 'react';
+import dayjs from 'dayjs';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+import { useState } from 'react';
+
+import type { LogEntry } from '@/types';
 
 interface LogEntryComponentProps {
 	log: LogEntry;
@@ -17,13 +19,7 @@ export function LogEntryComponent({ log }: LogEntryComponentProps) {
 	};
 
 	const formatTime = (timestamp: string) => {
-		return new Date(timestamp).toLocaleString('en-US', {
-			month: 'short',
-			day: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit',
-			second: '2-digit'
-		});
+		return dayjs(timestamp).format('lll');
 	};
 
 	const hasDetails = log.data.context || log.data.error;

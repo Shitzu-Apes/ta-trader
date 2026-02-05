@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+
 import { api } from '@/services/api';
 
 const REFRESH_INTERVAL = 30000; // 30 seconds
@@ -82,6 +83,15 @@ export function useLogs(limit = 100) {
 	return useQuery({
 		queryKey: ['logs', limit],
 		queryFn: () => api.getLogs(limit),
+		refetchInterval: REFRESH_INTERVAL,
+		staleTime: 25000
+	});
+}
+
+export function usePositionHistory(page = 1, limit = 10) {
+	return useQuery({
+		queryKey: ['positionHistory', page, limit],
+		queryFn: () => api.getPositionHistory(page, limit),
 		refetchInterval: REFRESH_INTERVAL,
 		staleTime: 25000
 	});

@@ -3,3 +3,7 @@ package-lock.json
 pnpm-lock.yaml
 yarn.lock
 api/.wrangler
+
+# Build outputs
+dist/
+node_modules/
