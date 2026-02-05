@@ -13,13 +13,9 @@ import datapoints from './datapoints';
 import { updateIndicators, analyzeMarketData } from './taapi';
 import { EnvBindings } from './types';
 
-// eslint-disable-next-line import/no-named-as-default-member
 dayjs.extend(duration);
-// eslint-disable-next-line import/no-named-as-default-member
 dayjs.extend(relativeTime);
-// eslint-disable-next-line import/no-named-as-default-member
 dayjs.extend(timezone);
-// eslint-disable-next-line import/no-named-as-default-member
 dayjs.extend(utc);
 
 const app = new Hono<Env>();

@@ -9,9 +9,9 @@
 		"cf-typegen": "wrangler types"
 	},
 	"dependencies": {
-		"dayjs": "^1.11.13",
-		"hono": "^4.6.16",
-		"ts-pattern": "^5.6.0",
-		"zod": "^3.24.1"
+		"dayjs": "^1.11.19",
+		"hono": "^4.11.7",
+		"ts-pattern": "^5.9.0",
+		"zod": "^4.3.6"
 	}
 }

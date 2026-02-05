@@ -51,32 +51,32 @@ The main configuration is in `config.ts`:
 ```typescript
 // Trading configuration
 export const TRADING_CONFIG = {
-    // Position thresholds
-    STOP_LOSS_THRESHOLD: -0.02,     // -2% stop loss
-    TAKE_PROFIT_THRESHOLD: 0.03,    // +3% take profit
-    INITIAL_BALANCE: 1000,          // Starting USDC balance
+	// Position thresholds
+	STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss
+	TAKE_PROFIT_THRESHOLD: 0.03, // +3% take profit
+	INITIAL_BALANCE: 1000, // Starting USDC balance
 
-    // Technical Analysis Multipliers
-    VWAP_MULTIPLIER: 0.4,          // Base VWAP signal weight
-    VWAP_EXTRA_MULTIPLIER: 0.6,    // Additional VWAP signal weight
-    BBANDS_MULTIPLIER: 1.5,        // Bollinger Bands weight
-    RSI_MULTIPLIER: 2.0,           // RSI weight
-    OBV_DIVERGENCE_MULTIPLIER: 0.8, // OBV divergence weight
-    PROFIT_SCORE_MULTIPLIER: 0.75,  // Profit-taking weight
-    TIME_DECAY_MULTIPLIER: 0.0001,  // Time decay weight per minute
+	// Technical Analysis Multipliers
+	VWAP_MULTIPLIER: 0.4, // Base VWAP signal weight
+	VWAP_EXTRA_MULTIPLIER: 0.6, // Additional VWAP signal weight
+	BBANDS_MULTIPLIER: 1.5, // Bollinger Bands weight
+	RSI_MULTIPLIER: 2.0, // RSI weight
+	OBV_DIVERGENCE_MULTIPLIER: 0.8, // OBV divergence weight
+	PROFIT_SCORE_MULTIPLIER: 0.75, // Profit-taking weight
+	TIME_DECAY_MULTIPLIER: 0.0001, // Time decay weight per minute
 
-    // Technical Analysis Parameters
-    VWAP_THRESHOLD: 0.01,          // 1% threshold for VWAP signals
-    OBV_WINDOW_SIZE: 12,           // 1 hour window for OBV analysis
-    SLOPE_THRESHOLD: 0.0001,       // Minimum slope for divergence detection
+	// Technical Analysis Parameters
+	VWAP_THRESHOLD: 0.01, // 1% threshold for VWAP signals
+	OBV_WINDOW_SIZE: 12, // 1 hour window for OBV analysis
+	SLOPE_THRESHOLD: 0.0001, // Minimum slope for divergence detection
 
-    // Partial Position Thresholds
-    PARTIAL_POSITION_THRESHOLDS: [
-        { buy: 2, sell: -0.5 },    // First partial
-        { buy: 4, sell: 0.5 },     // Second partial
-        { buy: 6, sell: 1.5 }      // Third partial
-    ]
-}
+	// Partial Position Thresholds
+	PARTIAL_POSITION_THRESHOLDS: [
+		{ buy: 2, sell: -0.5 }, // First partial
+		{ buy: 4, sell: 0.5 }, // Second partial
+		{ buy: 6, sell: 1.5 } // Third partial
+	]
+};
 ```
 
 ## Setup
@@ -124,12 +124,14 @@ The bot logs detailed information about:
 ## Supported Markets
 
 Currently supports multiple trading pairs on REF Finance:
+
 - NEAR/USDT
 - SOL/USDT
 - BTC/USDT
 - ETH/USDT
 
 Features:
+
 - Real-time price data via TAAPI
 - Smart Router API for best swap prices
 - Position tracking with partial positions
@@ -162,4 +164,4 @@ Feel free to submit issues and pull requests for:
 - Additional technical indicators
 - Market support
 - Performance improvements
-- Documentation updates 
+- Documentation updates
