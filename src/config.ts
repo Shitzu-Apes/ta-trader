@@ -45,6 +45,16 @@ export const BASE_TRADING_CONFIG = {
 	}
 } as const;
 
+// Max order size per symbol (in USD) - for liquidity management
+// Lower values for symbols with poorer liquidity
+export const MAX_ORDER_SIZE_USD: Record<PerpSymbol, number> = {
+	[PERP_SYMBOLS.NEAR]: 500,
+	[PERP_SYMBOLS.SOL]: 1000,
+	[PERP_SYMBOLS.BTC]: 5000,
+	[PERP_SYMBOLS.ETH]: 5000,
+	[PERP_SYMBOLS.BNB]: 2000
+};
+
 // Environment-specific configurations
 const ENV_CONFIGS: Record<
 	'testnet' | 'production',

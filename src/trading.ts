@@ -1,5 +1,5 @@
 import { ExchangeType, TradingAdapter } from './adapters';
-import { getTradingConfig, TRADING_CONFIG } from './config';
+import { getTradingConfig, TRADING_CONFIG, MAX_ORDER_SIZE_USD } from './config';
 import {
 	calculateObvScore,
 	calculateRsiScore,
@@ -307,6 +307,24 @@ export async function analyzeForecast(
 			return;
 		}
 
+		// Apply max order size limit based on symbol liquidity
+		const maxOrderSize = MAX_ORDER_SIZE_USD[symbol as keyof typeof MAX_ORDER_SIZE_USD] || balance;
+		const orderSize = Math.min(balance, maxOrderSize);
+
+		if (orderSize < maxOrderSize) {
+			logger.info(`Order size limited by available balance`, ctx, {
+				requested: maxOrderSize,
+				available: balance,
+				using: orderSize
+			});
+		} else if (orderSize < balance) {
+			logger.info(`Order size limited by max order size for ${symbol}`, ctx, {
+				balance,
+				maxOrderSize,
+				using: orderSize
+			});
+		}
+
 		const exchangeType = adapter.getExchangeType();
 		const options =
 			exchangeType === ExchangeType.AMM
@@ -323,24 +341,25 @@ export async function analyzeForecast(
 		logger.info(`Opening ${goLong ? 'long' : 'short'} position`, ctx, {
 			taScore,
 			balance,
+			orderSize,
 			threshold: thresholds.buy
 		});
 
 		try {
 			if (goLong) {
-				await adapter.openLongPosition(symbol, balance, options);
+				await adapter.openLongPosition(symbol, orderSize, options);
 			} else {
 				if (!adapter.openShortPosition) {
 					logger.error('Short positions not supported by adapter', undefined, ctx);
 					return;
 				}
-				await adapter.openShortPosition(symbol, balance, options);
+				await adapter.openShortPosition(symbol, orderSize, options);
 			}
 
 			const remainingBalance = await adapter.getBalance();
 			logger.info('Position opened successfully', ctx, {
 				direction: goLong ? 'LONG' : 'SHORT',
-				size: balance,
+				size: orderSize,
 				remainingBalance
 			});
 
@@ -355,7 +374,7 @@ export async function analyzeForecast(
 				taScore,
 				threshold: thresholds.buy,
 				price: actualPrice,
-				positionSize: balance,
+				positionSize: orderSize,
 				indicators: indicatorScores
 			};
 			await storeSignal(_env, entrySignal);
