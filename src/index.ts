@@ -9,7 +9,7 @@ import { poweredBy } from 'hono/powered-by';
 import type { HTTPResponseError } from 'hono/types';
 
 import { getAdapter } from './adapters';
-import { HTTP_CONFIG } from './config';
+import { getTradingConfig, HTTP_CONFIG } from './config';
 import datapoints from './datapoints';
 import { getLogger, resetLogger, createContext, withTiming } from './logger';
 import { updateIndicators, analyzeMarketData } from './taapi';
@@ -73,12 +73,24 @@ async function updateIndicatorsAndTrade(env: EnvBindings) {
 		// Wait for data to be stored
 		await new Promise((resolve) => setTimeout(resolve, HTTP_CONFIG.INDICATOR_FETCH_DELAY));
 
-		// Then run paper trading analysis only on PERP_NEAR_USDC
-		await withTiming(
-			logger,
-			'analyze_market_data',
-			() => analyzeMarketData(env, 'PERP_NEAR_USDC'),
-			createContext('PERP_NEAR_USDC', 'market_analysis')
+		// Get active symbols for this environment
+		const tradingConfig = getTradingConfig(env);
+		const activeSymbols = tradingConfig.ACTIVE_SYMBOLS;
+
+		logger.info(`Running market analysis for ${activeSymbols.length} symbols`, ctx, {
+			symbols: activeSymbols
+		});
+
+		// Run analysis for all active symbols
+		await Promise.all(
+			activeSymbols.map((symbol) =>
+				withTiming(
+					logger,
+					'analyze_market_data',
+					() => analyzeMarketData(env, symbol),
+					createContext(symbol, 'market_analysis')
+				)
+			)
 		);
 
 		logger.info('Completed scheduled trading cycle', ctx);
@@ -100,13 +112,24 @@ async function monitorPositions(env: EnvBindings) {
 	try {
 		const adapter = getAdapter(env);
 
+		// Get active symbols for this environment
+		const tradingConfig = getTradingConfig(env);
+		const activeSymbols = tradingConfig.ACTIVE_SYMBOLS;
+
+		logger.info(`Monitoring positions for ${activeSymbols.length} symbols`, ctx, {
+			symbols: activeSymbols
+		});
+
 		// Check positions for all active symbols
-		// Currently only monitoring PERP_NEAR_USDC
-		await withTiming(
-			logger,
-			'check_positions',
-			() => checkAndClosePositions(adapter, env, 'PERP_NEAR_USDC'),
-			createContext('PERP_NEAR_USDC', 'position_check')
+		await Promise.all(
+			activeSymbols.map((symbol) =>
+				withTiming(
+					logger,
+					'check_positions',
+					() => checkAndClosePositions(adapter, env, symbol),
+					createContext(symbol, 'position_check')
+				)
+			)
 		);
 
 		logger.info('Completed position monitoring', ctx);

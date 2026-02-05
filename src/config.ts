@@ -1,16 +1,31 @@
 import { EnvBindings } from './types';
 
+// All supported perpetual symbols as a const type
+export const PERP_SYMBOLS = {
+	NEAR: 'PERP_NEAR_USDC',
+	SOL: 'PERP_SOL_USDC',
+	BTC: 'PERP_BTC_USDC',
+	ETH: 'PERP_ETH_USDC',
+	BNB: 'PERP_BNB_USDC'
+} as const;
+
+// Derive the type from the const object
+export type PerpSymbol = (typeof PERP_SYMBOLS)[keyof typeof PERP_SYMBOLS];
+
+// All supported symbols as an array for iteration
+export const ALL_PERP_SYMBOLS: PerpSymbol[] = [
+	PERP_SYMBOLS.NEAR,
+	PERP_SYMBOLS.SOL,
+	PERP_SYMBOLS.BTC,
+	PERP_SYMBOLS.ETH,
+	PERP_SYMBOLS.BNB
+];
+
 // Base trading configuration (same for all environments)
 export const BASE_TRADING_CONFIG = {
 	// All supported trading pairs (Orderly format - used throughout the app)
 	// TAAPI uses Binance format which is converted via SYMBOL_MAP
-	SUPPORTED_SYMBOLS: [
-		'PERP_NEAR_USDC',
-		'PERP_SOL_USDC',
-		'PERP_BTC_USDC',
-		'PERP_ETH_USDC',
-		'PERP_BNB_USDC'
-	] as const,
+	SUPPORTED_SYMBOLS: ALL_PERP_SYMBOLS,
 
 	// Technical Analysis Multipliers
 	VWAP_MULTIPLIER: 0.4,
@@ -34,24 +49,18 @@ export const BASE_TRADING_CONFIG = {
 const ENV_CONFIGS: Record<
 	'testnet' | 'production',
 	{
-		ACTIVE_SYMBOLS: readonly string[];
+		ACTIVE_SYMBOLS: readonly PerpSymbol[];
 		STOP_LOSS_THRESHOLD: number;
 		TAKE_PROFIT_THRESHOLD: number;
 	}
 > = {
 	testnet: {
-		ACTIVE_SYMBOLS: ['PERP_BTC_USDC', 'PERP_ETH_USDC', 'PERP_BNB_USDC'],
+		ACTIVE_SYMBOLS: [PERP_SYMBOLS.BTC, PERP_SYMBOLS.ETH, PERP_SYMBOLS.BNB],
 		STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss
 		TAKE_PROFIT_THRESHOLD: 0.03 // +3% take profit
 	},
 	production: {
-		ACTIVE_SYMBOLS: [
-			'PERP_NEAR_USDC',
-			'PERP_SOL_USDC',
-			'PERP_BTC_USDC',
-			'PERP_ETH_USDC',
-			'PERP_BNB_USDC'
-		],
+		ACTIVE_SYMBOLS: ALL_PERP_SYMBOLS,
 		STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss
 		TAKE_PROFIT_THRESHOLD: 0.03 // +3% take profit
 	}
@@ -74,20 +83,22 @@ export const TRADING_CONFIG = BASE_TRADING_CONFIG;
 
 // Symbol mapping: Orderly format -> TAAPI format
 // Used only when fetching data from TAAPI (Binance)
-export const ORDERLY_TO_TAAPI_MAP: Record<string, string> = {
-	PERP_NEAR_USDC: 'NEAR/USDT',
-	PERP_SOL_USDC: 'SOL/USDT',
-	PERP_BTC_USDC: 'BTC/USDT',
-	PERP_ETH_USDC: 'ETH/USDT'
+export const ORDERLY_TO_TAAPI_MAP: Record<PerpSymbol, string> = {
+	[PERP_SYMBOLS.NEAR]: 'NEAR/USDT',
+	[PERP_SYMBOLS.SOL]: 'SOL/USDT',
+	[PERP_SYMBOLS.BTC]: 'BTC/USDT',
+	[PERP_SYMBOLS.ETH]: 'ETH/USDT',
+	[PERP_SYMBOLS.BNB]: 'BNB/USDT'
 };
 
 // Reverse mapping: TAAPI format -> Orderly format
 // Used when converting stored data back to Orderly format
-export const TAAPI_TO_ORDERLY_MAP: Record<string, string> = {
-	'NEAR/USDT': 'PERP_NEAR_USDC',
-	'SOL/USDT': 'PERP_SOL_USDC',
-	'BTC/USDT': 'PERP_BTC_USDC',
-	'ETH/USDT': 'PERP_ETH_USDC'
+export const TAAPI_TO_ORDERLY_MAP: Record<string, PerpSymbol> = {
+	'NEAR/USDT': PERP_SYMBOLS.NEAR,
+	'SOL/USDT': PERP_SYMBOLS.SOL,
+	'BTC/USDT': PERP_SYMBOLS.BTC,
+	'ETH/USDT': PERP_SYMBOLS.ETH,
+	'BNB/USDT': PERP_SYMBOLS.BNB
 };
 
 // Taapi API configuration

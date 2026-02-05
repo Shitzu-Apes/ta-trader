@@ -4,13 +4,13 @@ import { z } from 'zod';
 
 import { ExchangeType } from './adapters';
 import { getAdapter } from './adapters';
-import { TRADING_CONFIG } from './config';
+import { ALL_PERP_SYMBOLS } from './config';
 import { getSignals, getLatestSignal } from './signals';
 import { EnvBindings } from './types';
 
 const app = new Hono<{ Bindings: EnvBindings }>();
 
-const symbolSchema = z.enum(TRADING_CONFIG.SUPPORTED_SYMBOLS);
+const symbolSchema = z.enum(ALL_PERP_SYMBOLS as [string, ...string[]]);
 const indicatorSchema = z.enum(['candle', 'vwap', 'atr', 'bbands', 'rsi', 'obv'] as const);
 
 type DataPoint = {
