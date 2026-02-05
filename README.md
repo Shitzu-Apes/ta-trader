@@ -123,7 +123,29 @@ wrangler kv namespace create ta-trader-logs-production
 # Update wrangler.toml with all the IDs from above
 ```
 
-### 5. Configure Environment Variables
+### 5. Initialize D1 Database
+
+After creating the D1 database, you need to create the tables:
+
+```bash
+# For testnet
+yarn wrangler d1 execute ta-trader-testnet --env testnet --file migrations/0000_init.sql
+
+# For production
+yarn wrangler d1 execute ta-trader-production --env production --file migrations/0000_init.sql
+```
+
+Or apply all migrations:
+
+```bash
+# For testnet
+yarn wrangler d1 migrations apply ta-trader-testnet --env testnet
+
+# For production
+yarn wrangler d1 migrations apply ta-trader-production --env production
+```
+
+### 6. Configure Environment Variables
 
 **For testnet:**
 
@@ -159,7 +181,7 @@ wrangler secret put TAAPI_SECRET --env production
 wrangler secret put ORDERLY_PRIVATE_KEY --env production
 ```
 
-### 6. Deploy
+### 7. Deploy
 
 ```bash
 # Deploy to testnet
@@ -169,7 +191,7 @@ yarn deploy --env testnet
 yarn deploy --env production
 ```
 
-### 7. Verify Deployment
+### 8. Verify Deployment
 
 ```bash
 # Testnet
@@ -214,6 +236,8 @@ const ORDERLY_TO_TAAPI_MAP: Record<string, string> = {
 - `GET /api/portfolio` - Get overall portfolio status (balance + positions)
 - `GET /api/balance` - Get USDC balance
 - `POST /api/reset` - Close all positions
+- `GET /api/logs` - Get stored logs from KV (query params: `limit`, `prefix`)
+- `GET /api/logs/:key` - Get specific log entry by key
 
 ## Development
 

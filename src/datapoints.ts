@@ -337,4 +337,78 @@ app.post('/reset', async (c) => {
 	}
 });
 
+// Get logs from KV storage
+app.get('/logs', async (c) => {
+	try {
+		const limit = Number(c.req.query('limit') ?? '100');
+		const prefix = c.req.query('prefix') ?? 'logs:';
+
+		if (isNaN(limit) || limit < 1 || limit > 1000) {
+			return c.json({ error: 'Invalid limit. Must be between 1 and 1000' }, 400);
+		}
+
+		// List all keys with the logs prefix
+		const keys = await c.env.LOGS.list({ prefix });
+
+		// Get the most recent logs (sorted by key, which includes timestamp)
+		const sortedKeys = keys.keys.sort((a, b) => b.name.localeCompare(a.name)).slice(0, limit);
+
+		// Fetch all log entries
+		const logs = await Promise.all(
+			sortedKeys.map(async (key) => {
+				const value = await c.env.LOGS.get(key.name);
+				if (!value) return null;
+				try {
+					return {
+						key: key.name,
+						data: JSON.parse(value),
+						expiration: key.expiration
+					};
+				} catch {
+					return {
+						key: key.name,
+						data: value,
+						expiration: key.expiration
+					};
+				}
+			})
+		);
+
+		return c.json({
+			count: logs.length,
+			logs: logs.filter(Boolean)
+		});
+	} catch (error) {
+		console.error('Error fetching logs:', error);
+		return c.json({ error: 'Internal server error' }, 500);
+	}
+});
+
+// Get specific log entry
+app.get('/logs/:key', async (c) => {
+	try {
+		const key = c.req.param('key');
+		const value = await c.env.LOGS.get(key);
+
+		if (!value) {
+			return c.json({ error: 'Log not found' }, 404);
+		}
+
+		try {
+			return c.json({
+				key,
+				data: JSON.parse(value)
+			});
+		} catch {
+			return c.json({
+				key,
+				data: value
+			});
+		}
+	} catch (error) {
+		console.error('Error fetching log:', error);
+		return c.json({ error: 'Internal server error' }, 500);
+	}
+});
+
 export default app;
