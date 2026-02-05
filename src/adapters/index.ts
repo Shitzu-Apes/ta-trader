@@ -1,3 +1,4 @@
+import { getOrderlyBaseUrl } from '../orderly/auth';
 import { Position } from '../trading';
 import { EnvBindings } from '../types';
 
@@ -232,6 +233,78 @@ export interface TradingAdapter {
 	getSupportedMarkets?(): Promise<string[]>;
 	getMinimumTradeSize?(symbol: string): Promise<number>;
 	getFees?(symbol: string): Promise<Fees>;
+}
+
+// Symbol step size cache to avoid repeated API calls
+const stepSizeCache = new Map<string, number>();
+const STEP_SIZE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+let lastStepSizeFetch = 0;
+
+/**
+ * Round quantity to match the symbol's step size
+ * @param quantity - The calculated quantity
+ * @param stepSize - The minimum step size for the symbol
+ * @returns Rounded quantity as string
+ */
+export function roundQuantityToStepSize(quantity: number, stepSize: number): string {
+	// Calculate the number of decimal places from step size
+	const stepSizeStr = stepSize.toString();
+	const decimalIndex = stepSizeStr.indexOf('.');
+	const decimals = decimalIndex === -1 ? 0 : stepSizeStr.length - decimalIndex - 1;
+
+	// Round to the nearest step size
+	const rounded = Math.round(quantity / stepSize) * stepSize;
+
+	// Format with the correct number of decimal places
+	return rounded.toFixed(decimals);
+}
+
+/**
+ * Fetch step sizes for all symbols from Orderly API
+ */
+export async function fetchStepSizes(env: EnvBindings): Promise<Map<string, number>> {
+	const now = Date.now();
+
+	// Return cached values if still valid
+	if (stepSizeCache.size > 0 && now - lastStepSizeFetch < STEP_SIZE_CACHE_TTL) {
+		return stepSizeCache;
+	}
+
+	try {
+		const baseUrl = getOrderlyBaseUrl(env.ORDERLY_NETWORK);
+		const response = await fetch(`${baseUrl}/v1/public/info`);
+		if (!response.ok) {
+			throw new Error(`Failed to fetch market info: ${response.status}`);
+		}
+
+		const data = (await response.json()) as {
+			success: boolean;
+			data: { rows: Array<{ symbol: string; base_tick: number }> };
+		};
+
+		if (data.success && data.data?.rows) {
+			stepSizeCache.clear();
+			for (const row of data.data.rows) {
+				if (row.symbol && row.base_tick) {
+					stepSizeCache.set(row.symbol, row.base_tick);
+				}
+			}
+			lastStepSizeFetch = now;
+		}
+	} catch (error) {
+		// If fetch fails, return existing cache or empty map
+		console.error('Failed to fetch step sizes:', error);
+	}
+
+	return stepSizeCache;
+}
+
+/**
+ * Get step size for a specific symbol
+ */
+export async function getStepSize(env: EnvBindings, symbol: string): Promise<number> {
+	const cache = await fetchStepSizes(env);
+	return cache.get(symbol) || 0.001; // Default fallback
 }
 
 export function getAdapter(env: EnvBindings): TradingAdapter {

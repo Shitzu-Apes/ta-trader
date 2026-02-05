@@ -9,7 +9,9 @@ import {
 	MarketInfo,
 	LiquidityDepth,
 	TradeOptions,
-	TradeResult
+	TradeResult,
+	getStepSize,
+	roundQuantityToStepSize
 } from './index';
 
 // Orderly position response type
@@ -264,19 +266,25 @@ export class OrderlyAdapter implements TradingAdapter {
 
 		// size is in USDC, convert to base token quantity
 		const price = await this.getPrice(symbol);
-		const quantity = size / price;
+		const rawQuantity = size / price;
+
+		// Get step size and round quantity properly
+		const stepSize = await getStepSize(this.env, symbol);
+		const quantity = roundQuantityToStepSize(rawQuantity, stepSize);
 
 		logger.info('Opening long position', ctx, {
 			size,
 			price,
-			quantity
+			rawQuantity,
+			quantity,
+			stepSize
 		});
 
 		const orderBody = {
 			symbol,
 			order_type: 'MARKET',
 			side: 'BUY',
-			order_quantity: quantity.toFixed(6)
+			order_quantity: quantity
 		};
 
 		try {
@@ -296,7 +304,7 @@ export class OrderlyAdapter implements TradingAdapter {
 				type: ExchangeType.ORDERBOOK,
 				success: true,
 				executedPrice: price,
-				executedSize: quantity,
+				executedSize: parseFloat(quantity),
 				fee: 0, // Fees are deducted from balance automatically
 				orderId: response.data.order_id.toString()
 			};
@@ -323,19 +331,25 @@ export class OrderlyAdapter implements TradingAdapter {
 
 		// size is in USDC, convert to base token quantity
 		const price = await this.getPrice(symbol);
-		const quantity = size / price;
+		const rawQuantity = size / price;
+
+		// Get step size and round quantity properly
+		const stepSize = await getStepSize(this.env, symbol);
+		const quantity = roundQuantityToStepSize(rawQuantity, stepSize);
 
 		logger.info('Opening short position', ctx, {
 			size,
 			price,
-			quantity
+			rawQuantity,
+			quantity,
+			stepSize
 		});
 
 		const orderBody = {
 			symbol,
 			order_type: 'MARKET',
 			side: 'SELL',
-			order_quantity: quantity.toFixed(6)
+			order_quantity: quantity
 		};
 
 		try {
@@ -355,7 +369,7 @@ export class OrderlyAdapter implements TradingAdapter {
 				type: ExchangeType.ORDERBOOK,
 				success: true,
 				executedPrice: price,
-				executedSize: quantity,
+				executedSize: parseFloat(quantity),
 				fee: 0,
 				orderId: response.data.order_id.toString()
 			};
@@ -382,16 +396,22 @@ export class OrderlyAdapter implements TradingAdapter {
 
 		const price = await this.getPrice(symbol);
 
+		// Get step size and round quantity properly
+		const stepSize = await getStepSize(this.env, symbol);
+		const quantity = roundQuantityToStepSize(size, stepSize);
+
 		logger.info('Closing long position', ctx, {
 			size,
-			price
+			price,
+			quantity,
+			stepSize
 		});
 
 		const orderBody = {
 			symbol,
 			order_type: 'MARKET',
 			side: 'SELL',
-			order_quantity: size.toFixed(6)
+			order_quantity: quantity
 		};
 
 		try {
@@ -404,20 +424,21 @@ export class OrderlyAdapter implements TradingAdapter {
 
 			logger.info('Long position closed successfully', ctx, {
 				orderId: response.data.order_id,
-				size
+				quantity
 			});
 
 			return {
 				type: ExchangeType.ORDERBOOK,
 				success: true,
 				executedPrice: price,
-				executedSize: size,
+				executedSize: parseFloat(quantity),
 				fee: 0,
 				orderId: response.data.order_id.toString()
 			};
 		} catch (error) {
 			logger.error('Failed to close long position', error as Error, ctx, {
-				size
+				size,
+				quantity
 			});
 			throw error;
 		}
@@ -437,16 +458,22 @@ export class OrderlyAdapter implements TradingAdapter {
 
 		const price = await this.getPrice(symbol);
 
+		// Get step size and round quantity properly
+		const stepSize = await getStepSize(this.env, symbol);
+		const quantity = roundQuantityToStepSize(size, stepSize);
+
 		logger.info('Closing short position', ctx, {
 			size,
-			price
+			price,
+			quantity,
+			stepSize
 		});
 
 		const orderBody = {
 			symbol,
 			order_type: 'MARKET',
 			side: 'BUY',
-			order_quantity: size.toFixed(6)
+			order_quantity: quantity
 		};
 
 		try {
@@ -459,20 +486,21 @@ export class OrderlyAdapter implements TradingAdapter {
 
 			logger.info('Short position closed successfully', ctx, {
 				orderId: response.data.order_id,
-				size
+				quantity
 			});
 
 			return {
 				type: ExchangeType.ORDERBOOK,
 				success: true,
 				executedPrice: price,
-				executedSize: size,
+				executedSize: parseFloat(quantity),
 				fee: 0,
 				orderId: response.data.order_id.toString()
 			};
 		} catch (error) {
 			logger.error('Failed to close short position', error as Error, ctx, {
-				size
+				size,
+				quantity
 			});
 			throw error;
 		}
