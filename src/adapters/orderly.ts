@@ -107,13 +107,17 @@ export class OrderlyAdapter implements TradingAdapter {
 	}
 
 	async getBalance(): Promise<number> {
-		const response = await makeOrderlyRequest<{ data: { rows: OrderlyHolding[] } }>(
-			this.env,
-			'GET',
-			'/v1/client/holding'
-		);
+		const response = await makeOrderlyRequest<{
+			data?: { holding?: OrderlyHolding[] };
+			[key: string]: unknown;
+		}>(this.env, 'GET', '/v1/client/holding');
 
-		const usdcHolding = response.data.rows.find((h) => h.token === 'USDC');
+		if (!response.data || !response.data.holding) {
+			console.error('Unexpected response structure:', JSON.stringify(response));
+			throw new Error(`Unexpected Orderly API response: ${JSON.stringify(response)}`);
+		}
+
+		const usdcHolding = response.data.holding.find((h) => h.token === 'USDC');
 		return usdcHolding ? usdcHolding.holding : 0;
 	}
 
@@ -163,11 +167,15 @@ export class OrderlyAdapter implements TradingAdapter {
 	}
 
 	async getPositions(): Promise<Position[]> {
-		const response = await makeOrderlyRequest<{ data: { rows: OrderlyPosition[] } }>(
-			this.env,
-			'GET',
-			'/v1/positions'
-		);
+		const response = await makeOrderlyRequest<{
+			data?: { rows?: OrderlyPosition[] };
+			[key: string]: unknown;
+		}>(this.env, 'GET', '/v1/positions');
+
+		if (!response.data || !response.data.rows) {
+			console.error('Unexpected positions response:', JSON.stringify(response));
+			return [];
+		}
 
 		const positions: Position[] = [];
 

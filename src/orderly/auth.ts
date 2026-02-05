@@ -1,3 +1,6 @@
+import { getPublicKeyAsync, signAsync } from '@noble/ed25519';
+import bs58 from 'bs58';
+
 import { EnvBindings } from '../types';
 
 /**
@@ -6,9 +9,9 @@ import { EnvBindings } from '../types';
  * Orderly uses Ed25519 signatures for API authentication.
  * Each request must include:
  * - orderly-account-id: Your Orderly account ID
- * - orderly-key: Your public key (derived from private key)
+ * - orderly-key: Your public key (prefixed with 'ed25519:' and base58 encoded)
  * - orderly-timestamp: Current timestamp in milliseconds
- * - orderly-signature: Ed25519 signature of the message
+ * - orderly-signature: Ed25519 signature (base64url encoded)
  */
 
 // Message format for signing: timestamp + method + path + body (if present)
@@ -27,74 +30,95 @@ export function createSignMessage(
 
 // Get base URL based on network
 export function getOrderlyBaseUrl(network: 'testnet' | 'mainnet'): string {
-	return network === 'testnet' ? 'https://testnet-api.orderly.org' : 'https://api.orderly.org';
+	return network === 'testnet'
+		? 'https://testnet-api-evm.orderly.org'
+		: 'https://api-evm.orderly.org';
 }
 
-// Get public key from private key (Ed25519)
-// In a real implementation, this would use the Ed25519 library
-// For now, we'll derive it from the private key
-export function getPublicKeyFromPrivate(privateKey: string): string {
-	// This is a placeholder - in production, use proper Ed25519 derivation
-	// The public key is the last 64 characters of the private key (without 0x prefix)
-	const cleanKey = privateKey.replace('0x', '');
-	if (cleanKey.length === 128) {
-		return cleanKey.slice(64);
-	}
-	// If it's already just the public key (64 chars), return it
-	if (cleanKey.length === 64) {
-		return cleanKey;
-	}
-	throw new Error('Invalid private key format');
+// Helper: Convert base64url string
+function encodeBase64Url(bytes: Uint8Array): string {
+	// Convert to regular base64
+	const base64 = btoa(String.fromCharCode(...bytes));
+	// Convert to base64url (replace + with -, / with _, remove =)
+	return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
-// Sign a message using Ed25519
-// This is a placeholder - in production, use proper Ed25519 signing
-export async function signMessage(message: string, privateKey: string): Promise<string> {
-	// For Cloudflare Workers, we need to use the Web Crypto API
-	// Ed25519 is supported in modern browsers and Cloudflare Workers
+// Parse private key from base58 format (Orderly standard)
+function parsePrivateKey(privateKey: string): Uint8Array {
+	let cleanKey = privateKey.trim();
 
+	// Some keys may have prefixes like "ed25519:" or contain underscores
+	// Remove common prefixes and extract the actual key
+	if (cleanKey.includes(':')) {
+		cleanKey = cleanKey.split(':').pop() || cleanKey;
+	}
+
+	// Remove underscores if present (they might be separators)
+	cleanKey = cleanKey.replace(/_/g, '');
+
+	try {
+		// Decode base58
+		const decoded = bs58.decode(cleanKey);
+
+		// Orderly private keys are 32 bytes (seed)
+		// @noble/ed25519 can derive the public key from the seed
+		if (decoded.length === 32) {
+			return decoded;
+		} else if (decoded.length === 64) {
+			// If full 64-byte key provided, use first 32 bytes (seed)
+			return decoded.slice(0, 32);
+		} else {
+			throw new Error(
+				`Invalid key length after base58 decode: ${decoded.length} bytes (expected 32 or 64)`
+			);
+		}
+	} catch (error) {
+		if (error instanceof Error && error.message.includes('Invalid key length')) {
+			throw error;
+		}
+		// Try hex format as fallback
+	}
+
+	// Try hex format
+	const hexPattern = /^0x?[0-9a-fA-F]+$/;
+	if (hexPattern.test(cleanKey)) {
+		const hexKey = cleanKey.replace('0x', '');
+		if (hexKey.length === 64) {
+			// 32 bytes in hex
+			const bytes = new Uint8Array(32);
+			for (let i = 0; i < 64; i += 2) {
+				bytes[i / 2] = parseInt(hexKey.substring(i, i + 2), 16);
+			}
+			return bytes;
+		} else if (hexKey.length === 128) {
+			// 64 bytes in hex, use first 32
+			const bytes = new Uint8Array(32);
+			for (let i = 0; i < 64; i += 2) {
+				bytes[i / 2] = parseInt(hexKey.substring(i, i + 2), 16);
+			}
+			return bytes;
+		}
+	}
+
+	throw new Error(
+		`Invalid private key format. Length: ${cleanKey.length} chars. ` +
+			'Expected base58 encoded 32-byte seed (typical Orderly format) or 64 hex characters.'
+	);
+}
+
+// Get public key from private key (async - uses @noble/ed25519)
+async function getPublicKey(privateKey: Uint8Array): Promise<string> {
+	const publicKeyBytes = await getPublicKeyAsync(privateKey);
+	return bs58.encode(publicKeyBytes);
+}
+
+// Sign a message using Ed25519 via @noble/ed25519
+async function signMessage(message: string, privateKey: Uint8Array): Promise<string> {
 	const encoder = new TextEncoder();
 	const messageData = encoder.encode(message);
 
-	// Import the private key
-	const keyData = hexToUint8Array(privateKey.replace('0x', ''));
-
-	// For Ed25519, we need the raw private key (first 32 bytes) or the full 64 bytes
-	// The Web Crypto API supports Ed25519 in extractable format
-	const privateKeyBytes = keyData.slice(0, 32);
-
-	try {
-		const cryptoKey = await crypto.subtle.importKey(
-			'raw',
-			privateKeyBytes,
-			{ name: 'Ed25519' },
-			false,
-			['sign']
-		);
-
-		const signature = await crypto.subtle.sign('Ed25519', cryptoKey, messageData);
-		return uint8ArrayToHex(new Uint8Array(signature));
-	} catch (error) {
-		// Fallback: if Web Crypto doesn't support Ed25519, use a library
-		// For now, throw an error
-		throw new Error(`Ed25519 signing not supported: ${error}`);
-	}
-}
-
-// Helper: Convert hex string to Uint8Array
-function hexToUint8Array(hex: string): Uint8Array {
-	const bytes = new Uint8Array(hex.length / 2);
-	for (let i = 0; i < hex.length; i += 2) {
-		bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-	}
-	return bytes;
-}
-
-// Helper: Convert Uint8Array to hex string
-function uint8ArrayToHex(bytes: Uint8Array): string {
-	return Array.from(bytes)
-		.map((b) => b.toString(16).padStart(2, '0'))
-		.join('');
+	const signature = await signAsync(messageData, privateKey);
+	return encodeBase64Url(signature);
 }
 
 // Create authentication headers for Orderly API
@@ -106,13 +130,18 @@ export async function createAuthHeaders(
 ): Promise<Record<string, string>> {
 	const timestamp = Date.now().toString();
 	const message = createSignMessage(timestamp, method, path, body);
-	const signature = await signMessage(message, env.ORDERLY_PRIVATE_KEY);
-	const publicKey = getPublicKeyFromPrivate(env.ORDERLY_PRIVATE_KEY);
+
+	// Parse private key
+	const privateKeyBytes = parsePrivateKey(env.ORDERLY_PRIVATE_KEY);
+
+	// Get public key and signature
+	const publicKey = await getPublicKey(privateKeyBytes);
+	const signature = await signMessage(message, privateKeyBytes);
 
 	return {
 		'Content-Type': 'application/json',
 		'orderly-account-id': env.ORDERLY_ACCOUNT_ID,
-		'orderly-key': publicKey,
+		'orderly-key': `ed25519:${publicKey}`,
 		'orderly-timestamp': timestamp,
 		'orderly-signature': signature
 	};
@@ -144,10 +173,23 @@ export async function makeOrderlyRequest<T>(
 
 	const response = await fetch(url, options);
 
-	if (!response.ok) {
-		const errorText = await response.text();
-		throw new Error(`Orderly API error: ${response.status} ${errorText}`);
+	const responseText = await response.text();
+	let responseData: { success?: boolean; [key: string]: unknown };
+
+	try {
+		responseData = JSON.parse(responseText) as { success?: boolean; [key: string]: unknown };
+	} catch {
+		throw new Error(`Orderly API returned non-JSON: ${responseText}`);
 	}
 
-	return response.json() as Promise<T>;
+	if (!response.ok) {
+		throw new Error(`Orderly API error: ${response.status} ${JSON.stringify(responseData)}`);
+	}
+
+	// Check if response has success=false
+	if (responseData.success === false) {
+		throw new Error(`Orderly API error: ${JSON.stringify(responseData)}`);
+	}
+
+	return responseData as T;
 }

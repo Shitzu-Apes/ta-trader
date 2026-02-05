@@ -243,8 +243,9 @@ app.get('/balance', async (c) => {
 			currency: 'USDC'
 		});
 	} catch (error) {
-		console.error('Error getting balance:', error);
-		return c.json({ error: 'Internal server error' }, 500);
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		console.error('Error getting balance:', errorMessage);
+		return c.json({ error: 'Internal server error', details: errorMessage }, 500);
 	}
 });
 
@@ -265,8 +266,9 @@ app.get('/position/:symbol', async (c) => {
 		}
 		return c.json(position);
 	} catch (error) {
-		console.error('Error getting position:', error);
-		return c.json({ error: 'Internal server error' }, 500);
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		console.error('Error getting position:', errorMessage);
+		return c.json({ error: 'Internal server error', details: errorMessage }, 500);
 	}
 });
 
@@ -280,8 +282,9 @@ app.get('/positions', async (c) => {
 			positions
 		});
 	} catch (error) {
-		console.error('Error getting positions:', error);
-		return c.json({ error: 'Internal server error' }, 500);
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		console.error('Error getting positions:', errorMessage);
+		return c.json({ error: 'Internal server error', details: errorMessage }, 500);
 	}
 });
 
@@ -301,8 +304,9 @@ app.get('/portfolio', async (c) => {
 			positions
 		});
 	} catch (error) {
-		console.error('Error getting portfolio:', error);
-		return c.json({ error: 'Internal server error' }, 500);
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		console.error('Error getting portfolio:', errorMessage);
+		return c.json({ error: 'Internal server error', details: errorMessage }, 500);
 	}
 });
 
