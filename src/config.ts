@@ -40,8 +40,8 @@ export const BASE_TRADING_CONFIG = {
 
 	// Position Thresholds
 	POSITION_THRESHOLDS: {
-		long: { buy: 1.5, sell: -0.5 },
-		short: { buy: -1.5, sell: 0.5 }
+		long: { buy: 2, sell: -0.5 },
+		short: { buy: -2, sell: 0.5 }
 	}
 } as const;
 
