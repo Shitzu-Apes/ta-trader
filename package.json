@@ -14,9 +14,15 @@
 		"logs": "node scripts/monitor-logs.js",
 		"logs:testnet": "node scripts/monitor-logs.js --env testnet",
 		"logs:prod": "node scripts/monitor-logs.js --env production",
+		"status": "node scripts/check-status.js",
+		"status:testnet": "node scripts/check-status.js testnet",
+		"status:prod": "node scripts/check-status.js production",
 		"market": "tsx scripts/api-market.js",
 		"market:testnet": "tsx scripts/api-market.js testnet",
-		"market:prod": "tsx scripts/api-market.js production"
+		"market:prod": "tsx scripts/api-market.js production",
+		"signals": "node scripts/investigate-signals.js",
+		"signals:testnet": "node scripts/investigate-signals.js testnet",
+		"signals:prod": "node scripts/investigate-signals.js production"
 	},
 	"dependencies": {
 		"@orderly.network/core": "^2.8.13",

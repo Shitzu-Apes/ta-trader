@@ -111,18 +111,51 @@ export class OrderlyAdapter implements TradingAdapter {
 	}
 
 	async getBalance(): Promise<number> {
-		const response = await makeOrderlyRequest<{
-			data?: { holding?: OrderlyHolding[] };
-			[key: string]: unknown;
-		}>(this.env, 'GET', '/v1/client/holding');
+		// Fetch both holdings and positions to calculate true balance
+		const [holdingResponse, positionsResponse] = await Promise.all([
+			makeOrderlyRequest<{
+				data?: { holding?: OrderlyHolding[] };
+				[key: string]: unknown;
+			}>(this.env, 'GET', '/v1/client/holding'),
+			makeOrderlyRequest<{
+				data?: { rows?: OrderlyPosition[] };
+				[key: string]: unknown;
+			}>(this.env, 'GET', '/v1/positions')
+		]);
 
-		if (!response.data || !response.data.holding) {
-			console.error('Unexpected response structure:', JSON.stringify(response));
-			throw new Error(`Unexpected Orderly API response: ${JSON.stringify(response)}`);
+		if (!holdingResponse.data || !holdingResponse.data.holding) {
+			console.error('Unexpected holding response:', JSON.stringify(holdingResponse));
+			throw new Error(`Unexpected Orderly API response: ${JSON.stringify(holdingResponse)}`);
 		}
 
-		const usdcHolding = response.data.holding.find((h) => h.token === 'USDC');
-		return usdcHolding ? usdcHolding.holding : 0;
+		const usdcHolding = holdingResponse.data.holding.find((h) => h.token === 'USDC');
+		const holdingBalance = usdcHolding ? usdcHolding.holding : 0;
+
+		// Calculate total unsettled PnL from all positions
+		let totalUnsettledPnl = 0;
+		let totalRealizedPnl = 0;
+
+		if (positionsResponse.data?.rows) {
+			for (const pos of positionsResponse.data.rows) {
+				totalUnsettledPnl += pos.unsettled_pnl || 0;
+				totalRealizedPnl += pos.realized_pnl || 0;
+			}
+		}
+
+		// Total balance = holding + unsettled PnL + realized PnL
+		// Realized PnL is already reflected in holding after settlement,
+		// but we include it here to show the true trading performance
+		const totalBalance = holdingBalance + totalUnsettledPnl;
+
+		const logger = getLogger(this.env);
+		logger.debug('Balance calculated', {
+			holdingBalance,
+			totalUnsettledPnl,
+			totalRealizedPnl,
+			totalBalance
+		});
+
+		return totalBalance;
 	}
 
 	async getPosition(symbol: string): Promise<Position | null> {

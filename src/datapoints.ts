@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { ExchangeType } from './adapters';
 import { getAdapter } from './adapters';
 import { TRADING_CONFIG } from './config';
+import { getSignals, getLatestSignal } from './signals';
 import { EnvBindings } from './types';
 
 const app = new Hono<{ Bindings: EnvBindings }>();
@@ -411,6 +412,67 @@ app.get('/logs/:key', async (c) => {
 		}
 	} catch (error) {
 		console.error('Error fetching log:', error);
+		return c.json({ error: 'Internal server error' }, 500);
+	}
+});
+
+// Get trading signals for a symbol
+app.get('/signals/:symbol', async (c) => {
+	const symbol = c.req.param('symbol');
+
+	if (!symbolSchema.safeParse(symbol).success) {
+		return c.json({ error: 'Invalid symbol' }, 400);
+	}
+
+	try {
+		const limit = Number(c.req.query('limit') ?? '50');
+		const from = c.req.query('from');
+		const to = c.req.query('to');
+		const type = c.req.query('type') as 'ENTRY' | 'EXIT' | 'NO_ACTION' | undefined;
+
+		if (isNaN(limit) || limit < 1 || limit > 1000) {
+			return c.json({ error: 'Invalid limit. Must be between 1 and 1000' }, 400);
+		}
+
+		const signals = await getSignals(c.env, symbol, {
+			limit,
+			from: from ? parseInt(from) : undefined,
+			to: to ? parseInt(to) : undefined,
+			type
+		});
+
+		return c.json({
+			symbol,
+			count: signals.length,
+			signals
+		});
+	} catch (error) {
+		console.error('Error fetching signals:', error);
+		return c.json({ error: 'Internal server error' }, 500);
+	}
+});
+
+// Get latest trading signal for a symbol
+app.get('/signals/:symbol/latest', async (c) => {
+	const symbol = c.req.param('symbol');
+
+	if (!symbolSchema.safeParse(symbol).success) {
+		return c.json({ error: 'Invalid symbol' }, 400);
+	}
+
+	try {
+		const signal = await getLatestSignal(c.env, symbol);
+
+		if (!signal) {
+			return c.json({ error: 'No signals found' }, 404);
+		}
+
+		return c.json({
+			symbol,
+			signal
+		});
+	} catch (error) {
+		console.error('Error fetching latest signal:', error);
 		return c.json({ error: 'Internal server error' }, 500);
 	}
 });

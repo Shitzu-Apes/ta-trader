@@ -7,6 +7,7 @@ import {
 	calculateVwapScore
 } from './indicators';
 import { getLogger, createContext } from './logger';
+import { storeSignal, TradingSignal } from './signals';
 import { EnvBindings } from './types';
 
 export type Position = {
@@ -33,35 +34,51 @@ function calculateTaScore(
 	rsi: number,
 	prices: number[],
 	obvs: number[]
-): number {
+): {
+	score: number;
+	indicators: {
+		vwap: number;
+		bbands: number;
+		rsi: number;
+		obv: number;
+		total: number;
+	};
+} {
 	// Calculate base scores
 	const vwapScore = calculateVwapScore(currentPrice, vwap);
 	const bbandsScore = calculateBBandsScore(currentPrice, bbandsUpper, bbandsLower);
 	const rsiScore = calculateRsiScore(rsi);
 	const obvScore = calculateObvScore(prices, obvs, symbol);
 
+	// Calculate weighted scores
+	const weightedVwap = vwapScore * TRADING_CONFIG.VWAP_MULTIPLIER;
+	const weightedBbands = bbandsScore * TRADING_CONFIG.BBANDS_MULTIPLIER;
+	const weightedRsi = rsiScore * TRADING_CONFIG.RSI_MULTIPLIER;
+	const weightedObv = obvScore * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER;
+
 	// Log individual scores
 	const logger = getLogger();
 	logger.debug('Individual TA scores calculated', createContext(symbol, 'ta_scores'), {
-		vwap: vwapScore * TRADING_CONFIG.VWAP_MULTIPLIER,
-		bbands: bbandsScore * TRADING_CONFIG.BBANDS_MULTIPLIER,
-		rsi: rsiScore * TRADING_CONFIG.RSI_MULTIPLIER,
-		obv: obvScore * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER,
-		total:
-			vwapScore * TRADING_CONFIG.VWAP_MULTIPLIER +
-			bbandsScore * TRADING_CONFIG.BBANDS_MULTIPLIER +
-			rsiScore * TRADING_CONFIG.RSI_MULTIPLIER +
-			obvScore * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER
+		vwap: weightedVwap,
+		bbands: weightedBbands,
+		rsi: weightedRsi,
+		obv: weightedObv,
+		total: weightedVwap + weightedBbands + weightedRsi + weightedObv
 	});
 
 	// Calculate total score
-	const total =
-		vwapScore * TRADING_CONFIG.VWAP_MULTIPLIER +
-		bbandsScore * TRADING_CONFIG.BBANDS_MULTIPLIER +
-		rsiScore * TRADING_CONFIG.RSI_MULTIPLIER +
-		obvScore * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER;
+	const total = weightedVwap + weightedBbands + weightedRsi + weightedObv;
 
-	return total;
+	return {
+		score: total,
+		indicators: {
+			vwap: weightedVwap,
+			bbands: weightedBbands,
+			rsi: weightedRsi,
+			obv: weightedObv,
+			total: total
+		}
+	};
 }
 
 /**
@@ -113,7 +130,7 @@ export async function analyzeForecast(
 	});
 
 	// Calculate technical analysis score
-	const taScore = calculateTaScore(
+	const taScoreResult = calculateTaScore(
 		symbol,
 		actualPrice,
 		vwap,
@@ -123,6 +140,8 @@ export async function analyzeForecast(
 		prices,
 		obvs
 	);
+	const taScore = taScoreResult.score;
+	const indicatorScores = taScoreResult.indicators;
 
 	logger.info('TA Score calculated', ctx, { taScore });
 
@@ -158,6 +177,26 @@ export async function analyzeForecast(
 				priceDiff: (priceDiff * 100).toFixed(4) + '%',
 				threshold: (tradingConfig.STOP_LOSS_THRESHOLD * 100).toFixed(2) + '%'
 			});
+
+			// Store exit signal
+			const exitSignal: TradingSignal = {
+				symbol,
+				timestamp: Date.now(),
+				type: 'EXIT',
+				action: 'CLOSE',
+				direction: position.isLong ? 'LONG' : 'SHORT',
+				reason: 'STOP_LOSS',
+				taScore,
+				threshold: tradingConfig.STOP_LOSS_THRESHOLD,
+				price: actualPrice,
+				positionSize: position.size,
+				entryPrice: position.entryPrice,
+				unrealizedPnl: position.unrealizedPnl,
+				realizedPnl: position.realizedPnl,
+				indicators: indicatorScores
+			};
+			await storeSignal(_env, exitSignal);
+
 			await closePosition(adapter, symbol, position);
 			return;
 		}
@@ -170,6 +209,26 @@ export async function analyzeForecast(
 				priceDiff: (priceDiff * 100).toFixed(4) + '%',
 				threshold: (tradingConfig.TAKE_PROFIT_THRESHOLD * 100).toFixed(2) + '%'
 			});
+
+			// Store exit signal
+			const exitSignal: TradingSignal = {
+				symbol,
+				timestamp: Date.now(),
+				type: 'EXIT',
+				action: 'CLOSE',
+				direction: position.isLong ? 'LONG' : 'SHORT',
+				reason: 'TAKE_PROFIT',
+				taScore,
+				threshold: tradingConfig.TAKE_PROFIT_THRESHOLD,
+				price: actualPrice,
+				positionSize: position.size,
+				entryPrice: position.entryPrice,
+				unrealizedPnl: position.unrealizedPnl,
+				realizedPnl: position.realizedPnl,
+				indicators: indicatorScores
+			};
+			await storeSignal(_env, exitSignal);
+
 			await closePosition(adapter, symbol, position);
 			return;
 		}
@@ -183,6 +242,26 @@ export async function analyzeForecast(
 				threshold: thresholds.sell,
 				isLong: position.isLong
 			});
+
+			// Store exit signal
+			const exitSignal: TradingSignal = {
+				symbol,
+				timestamp: Date.now(),
+				type: 'EXIT',
+				action: 'CLOSE',
+				direction: position.isLong ? 'LONG' : 'SHORT',
+				reason: 'SIGNAL_REVERSAL',
+				taScore,
+				threshold: thresholds.sell,
+				price: actualPrice,
+				positionSize: position.size,
+				entryPrice: position.entryPrice,
+				unrealizedPnl: position.unrealizedPnl,
+				realizedPnl: position.realizedPnl,
+				indicators: indicatorScores
+			};
+			await storeSignal(_env, exitSignal);
+
 			await closePosition(adapter, symbol, position);
 			return;
 		}
@@ -194,6 +273,24 @@ export async function analyzeForecast(
 			unrealizedPnl: position.unrealizedPnl,
 			priceDiff: (priceDiff * 100).toFixed(4) + '%'
 		});
+
+		// Store hold signal
+		const holdSignal: TradingSignal = {
+			symbol,
+			timestamp: Date.now(),
+			type: 'HOLD',
+			direction: position.isLong ? 'LONG' : 'SHORT',
+			taScore,
+			threshold: thresholds.sell,
+			price: actualPrice,
+			positionSize: position.size,
+			entryPrice: position.entryPrice,
+			unrealizedPnl: position.unrealizedPnl,
+			realizedPnl: position.realizedPnl,
+			indicators: indicatorScores
+		};
+		await storeSignal(_env, holdSignal);
+
 		return;
 	}
 
@@ -246,6 +343,22 @@ export async function analyzeForecast(
 				size: balance,
 				remainingBalance
 			});
+
+			// Store entry signal
+			const entrySignal: TradingSignal = {
+				symbol,
+				timestamp: Date.now(),
+				type: 'ENTRY',
+				action: 'OPEN',
+				direction: goLong ? 'LONG' : 'SHORT',
+				reason: 'TA_SCORE',
+				taScore,
+				threshold: thresholds.buy,
+				price: actualPrice,
+				positionSize: balance,
+				indicators: indicatorScores
+			};
+			await storeSignal(_env, entrySignal);
 		} catch (error) {
 			logger.error('Failed to open position', error as Error, ctx, {
 				direction: goLong ? 'LONG' : 'SHORT',
@@ -261,6 +374,18 @@ export async function analyzeForecast(
 		buyThreshold: thresholds.buy,
 		reason: 'Score below threshold'
 	});
+
+	// Store no-action signal
+	const noActionSignal: TradingSignal = {
+		symbol,
+		timestamp: Date.now(),
+		type: 'NO_ACTION',
+		taScore,
+		threshold: thresholds.buy,
+		price: actualPrice,
+		indicators: indicatorScores
+	};
+	await storeSignal(_env, noActionSignal);
 }
 
 /**
