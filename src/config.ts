@@ -4,7 +4,13 @@ import { EnvBindings } from './types';
 export const BASE_TRADING_CONFIG = {
 	// All supported trading pairs (Orderly format - used throughout the app)
 	// TAAPI uses Binance format which is converted via SYMBOL_MAP
-	SUPPORTED_SYMBOLS: ['PERP_NEAR_USDC', 'PERP_SOL_USDC', 'PERP_BTC_USDC', 'PERP_ETH_USDC'] as const,
+	SUPPORTED_SYMBOLS: [
+		'PERP_NEAR_USDC',
+		'PERP_SOL_USDC',
+		'PERP_BTC_USDC',
+		'PERP_ETH_USDC',
+		'PERP_BNB_USDC'
+	] as const,
 
 	// Technical Analysis Multipliers
 	VWAP_MULTIPLIER: 0.4,
@@ -19,8 +25,8 @@ export const BASE_TRADING_CONFIG = {
 
 	// Position Thresholds
 	POSITION_THRESHOLDS: {
-		long: { buy: 2.0, sell: -0.5 },
-		short: { buy: -2.0, sell: 0.5 }
+		long: { buy: 1.5, sell: -0.5 },
+		short: { buy: -1.5, sell: 0.5 }
 	}
 } as const;
 
@@ -34,12 +40,18 @@ const ENV_CONFIGS: Record<
 	}
 > = {
 	testnet: {
-		ACTIVE_SYMBOLS: ['PERP_BTC_USDC', 'PERP_ETH_USDC'],
+		ACTIVE_SYMBOLS: ['PERP_BTC_USDC', 'PERP_ETH_USDC', 'PERP_BNB_USDC'],
 		STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss
 		TAKE_PROFIT_THRESHOLD: 0.03 // +3% take profit
 	},
 	production: {
-		ACTIVE_SYMBOLS: ['PERP_NEAR_USDC', 'PERP_SOL_USDC', 'PERP_BTC_USDC', 'PERP_ETH_USDC'],
+		ACTIVE_SYMBOLS: [
+			'PERP_NEAR_USDC',
+			'PERP_SOL_USDC',
+			'PERP_BTC_USDC',
+			'PERP_ETH_USDC',
+			'PERP_BNB_USDC'
+		],
 		STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss
 		TAKE_PROFIT_THRESHOLD: 0.03 // +3% take profit
 	}
