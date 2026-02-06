@@ -79,10 +79,10 @@ export function useLatestSignal(symbol: string) {
 	});
 }
 
-export function useLogs(limit = 100) {
+export function useLogs(limit = 50, cursor?: string, levels?: string[]) {
 	return useQuery({
-		queryKey: ['logs', limit],
-		queryFn: () => api.getLogs(limit),
+		queryKey: ['logs', limit, cursor, levels],
+		queryFn: () => api.getLogs(limit, cursor, levels),
 		refetchInterval: REFRESH_INTERVAL,
 		staleTime: 25000
 	});

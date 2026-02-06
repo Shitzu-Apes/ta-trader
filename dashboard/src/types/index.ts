@@ -115,9 +115,11 @@ export interface LogEntry {
 export interface LogsData {
 	count: number;
 	total: number;
-	offset: number;
-	limit: number;
 	logs: LogEntry[];
+	pagination: {
+		hasMore: boolean;
+		nextCursor?: string;
+	};
 }
 
 export interface PositionHistory {

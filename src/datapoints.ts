@@ -503,9 +503,9 @@ app.post('/reset', async (c) => {
 // Get logs from KV storage
 app.get('/logs', async (c) => {
 	try {
-		const limit = Number(c.req.query('limit') ?? '100');
-		const offset = Number(c.req.query('offset') ?? '0');
-		const level = c.req.query('level');
+		const limit = Number(c.req.query('limit') ?? '50');
+		const cursor = c.req.query('cursor');
+		const levels = c.req.queries('level');
 		const symbol = c.req.query('symbol');
 		const operation = c.req.query('operation');
 		const from = c.req.query('from');
@@ -515,46 +515,63 @@ app.get('/logs', async (c) => {
 			return c.json({ error: 'Invalid limit. Must be between 1 and 1000' }, 400);
 		}
 
-		// Build query with filters
-		let whereClause = 'WHERE 1=1';
-		const params: (string | number)[] = [];
+		// Build base WHERE clause without cursor (for total count)
+		let baseWhereClause = 'WHERE 1=1';
+		const baseParams: (string | number)[] = [];
 
-		if (level) {
-			whereClause += ' AND level = ?';
-			params.push(level);
+		if (levels && levels.length > 0) {
+			// Support multiple levels via IN clause
+			const placeholders = levels.map(() => '?').join(', ');
+			baseWhereClause += ` AND level IN (${placeholders})`;
+			baseParams.push(...levels);
 		}
 		if (symbol) {
-			whereClause += ' AND symbol = ?';
-			params.push(symbol);
+			baseWhereClause += ' AND symbol = ?';
+			baseParams.push(symbol);
 		}
 		if (operation) {
-			whereClause += ' AND operation = ?';
-			params.push(operation);
+			baseWhereClause += ' AND operation = ?';
+			baseParams.push(operation);
 		}
 		if (from) {
-			whereClause += ' AND timestamp >= ?';
-			params.push(parseInt(from));
+			baseWhereClause += ' AND timestamp >= ?';
+			baseParams.push(parseInt(from));
 		}
 		if (to) {
-			whereClause += ' AND timestamp <= ?';
-			params.push(parseInt(to));
+			baseWhereClause += ' AND timestamp <= ?';
+			baseParams.push(parseInt(to));
 		}
 
-		// Get total count
-		const countResult = await c.env.DB.prepare(`SELECT COUNT(*) as total FROM logs ${whereClause}`)
-			.bind(...params)
+		// Get total count (without cursor)
+		const countResult = await c.env.DB.prepare(
+			`SELECT COUNT(*) as total FROM logs ${baseWhereClause}`
+		)
+			.bind(...baseParams)
 			.first<{ total: number }>();
 
-		// Get logs with pagination
-		params.push(limit, offset);
+		// Build data WHERE clause with cursor for pagination
+		let dataWhereClause = baseWhereClause;
+		const dataParams = [...baseParams];
+
+		if (cursor) {
+			// Cursor-based pagination using timestamp
+			const cursorTimestamp = parseInt(cursor, 10);
+			if (!isNaN(cursorTimestamp)) {
+				dataWhereClause += ' AND timestamp < ?';
+				dataParams.push(cursorTimestamp);
+			}
+		}
+
+		// Get logs with pagination (limit + 1 to check for more)
+		const fetchLimit = limit + 1;
 		const logs = await c.env.DB.prepare(
-			`SELECT * FROM logs ${whereClause} ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+			`SELECT * FROM logs ${dataWhereClause} ORDER BY timestamp DESC LIMIT ?`
 		)
-			.bind(...params)
+			.bind(...dataParams, fetchLimit)
 			.all();
 
 		// Format logs for response
-		const formattedLogs =
+		let formattedLogs =
 			logs.results?.map((row: Record<string, unknown>) => ({
 				id: row.id,
 				timestamp: new Date(row.timestamp as number).toISOString(),
@@ -568,12 +585,28 @@ app.get('/logs', async (c) => {
 				createdAt: row.created_at
 			})) ?? [];
 
+		// Determine if there's more and get next cursor
+		let nextCursor: string | undefined;
+		const hasMore = formattedLogs.length > limit;
+
+		if (hasMore) {
+			// Remove the extra item we fetched
+			formattedLogs = formattedLogs.slice(0, limit);
+			// Use the timestamp of the last item as next cursor
+			const lastLog = formattedLogs[formattedLogs.length - 1];
+			if (lastLog) {
+				nextCursor = String(new Date(lastLog.timestamp).getTime());
+			}
+		}
+
 		return c.json({
 			count: formattedLogs.length,
 			total: countResult?.total ?? 0,
-			offset,
-			limit,
-			logs: formattedLogs
+			logs: formattedLogs,
+			pagination: {
+				hasMore,
+				nextCursor
+			}
 		});
 	} catch (error) {
 		console.error('Error fetching logs:', error);
