@@ -9,7 +9,7 @@ import { formatCurrency } from '@/lib/format';
 export function Positions() {
 	const { data: positionsData, isLoading: positionsLoading } = usePositions();
 	const [historyPage, setHistoryPage] = useState(1);
-	const { data: historyData, isLoading: historyLoading } = usePositionHistory(historyPage, 10);
+	const { data: historyData, isLoading: historyLoading } = usePositionHistory(historyPage, 25);
 
 	const isLoading = positionsLoading;
 	const positions = positionsData?.positions || [];
@@ -137,7 +137,7 @@ export function Positions() {
 			<div className="card">
 				<div className="flex items-center justify-between mb-4">
 					<h2 className="text-lg font-semibold text-text">Position History</h2>
-					{pagination && pagination.totalPages > 1 && (
+					{pagination && pagination.total > 0 && (
 						<div className="flex items-center gap-2">
 							<button
 								onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
@@ -147,7 +147,7 @@ export function Positions() {
 								<ChevronLeft className="w-5 h-5" />
 							</button>
 							<span className="text-sm text-text-muted">
-								Page {pagination.page} of {pagination.totalPages}
+								Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
 							</span>
 							<button
 								onClick={() => setHistoryPage((p) => p + 1)}

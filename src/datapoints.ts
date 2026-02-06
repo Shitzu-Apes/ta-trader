@@ -22,6 +22,27 @@ type DataPoint = {
 	created_at: string;
 };
 
+// Cache for position history to avoid repeated API calls
+// Key: symbol (or 'all'), Value: { data: history[], timestamp: number }
+const positionHistoryCache = new Map<
+	string,
+	{
+		history: Array<{
+			symbol: string;
+			side: 'LONG' | 'SHORT';
+			size: number;
+			entryPrice: number;
+			exitPrice: number;
+			realizedPnl: number;
+			openedAt: number;
+			closedAt: number;
+		}>;
+		timestamp: number;
+	}
+>();
+
+const CACHE_TTL_MS = 30000; // 30 seconds
+
 // Helper function to get the current 5-minute timeframe
 export function getCurrentTimeframe() {
 	const now = dayjs();
@@ -323,37 +344,62 @@ app.get('/position-history', async (c) => {
 
 		// Parse pagination params
 		const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
-		const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') ?? '10', 10)));
+		const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '25', 10)));
 
 		// Get symbol filter (optional)
 		const symbol = c.req.query('symbol') ?? undefined;
+		const cacheKey = symbol ?? 'all';
 
-		// Fetch more items than needed to support pagination
-		// Orderly API returns most recent first
-		const fetchLimit = page * limit;
-		const result = await adapter.getPositionHistory?.(symbol, fetchLimit);
+		// Check cache first
+		const cached = positionHistoryCache.get(cacheKey);
+		const now = Date.now();
+		let fullHistory: Array<{
+			symbol: string;
+			side: 'LONG' | 'SHORT';
+			size: number;
+			entryPrice: number;
+			exitPrice: number;
+			realizedPnl: number;
+			openedAt: number;
+			closedAt: number;
+		}>;
 
-		if (!result) {
-			return c.json({
-				history: [],
-				pagination: {
-					page,
-					limit,
-					total: 0,
-					totalPages: 0,
-					hasNext: false,
-					hasPrev: false
-				}
+		if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+			// Use cached data
+			fullHistory = cached.history;
+		} else {
+			// Fetch fresh data from Orderly API with max limit of 1000
+			const result = await adapter.getPositionHistory?.(symbol, 1000);
+
+			if (!result) {
+				return c.json({
+					history: [],
+					pagination: {
+						page,
+						limit,
+						total: 0,
+						totalPages: 0,
+						hasNext: false,
+						hasPrev: false
+					}
+				});
+			}
+
+			fullHistory = result.history;
+
+			// Update cache
+			positionHistoryCache.set(cacheKey, {
+				history: fullHistory,
+				timestamp: now
 			});
 		}
 
-		const { history, total } = result;
-
-		// Calculate pagination
+		// Calculate pagination from full dataset
+		const total = fullHistory.length;
 		const totalPages = Math.ceil(total / limit);
 		const startIndex = (page - 1) * limit;
 		const endIndex = startIndex + limit;
-		const paginatedHistory = history.slice(startIndex, endIndex);
+		const paginatedHistory = fullHistory.slice(startIndex, endIndex);
 
 		return c.json({
 			history: paginatedHistory,
