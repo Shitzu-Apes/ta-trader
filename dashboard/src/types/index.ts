@@ -82,6 +82,13 @@ export interface Signal {
 		obv: number;
 		total: number;
 	};
+	// Additional fields
+	targetSize?: number;
+	currentSize?: number;
+	intensity?: number;
+	availableLeverage?: number;
+	profitScore?: number;
+	timeDecayScore?: number;
 }
 
 export interface SignalsData {

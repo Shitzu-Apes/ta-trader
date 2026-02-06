@@ -1,16 +1,43 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { SignalBadge } from '@/components/SignalBadge';
 import { useConfig, useSignals } from '@/hooks/useApi';
 import type { Signal } from '@/types';
+
+const SIGNAL_TYPES: Signal['type'][] = [
+	'ENTRY',
+	'EXIT',
+	'STOP_LOSS',
+	'TAKE_PROFIT',
+	'ADJUSTMENT',
+	'HOLD',
+	'NO_ACTION'
+];
+
+const typeConfig: Record<Signal['type'], { label: string }> = {
+	ENTRY: { label: 'Entry' },
+	EXIT: { label: 'Exit' },
+	STOP_LOSS: { label: 'Stop Loss' },
+	TAKE_PROFIT: { label: 'Take Profit' },
+	ADJUSTMENT: { label: 'Adjustment' },
+	HOLD: { label: 'Hold' },
+	NO_ACTION: { label: 'No Action' }
+};
 
 export function Signals() {
 	const { data: config } = useConfig();
 	const [selectedSymbol, setSelectedSymbol] = useState(
 		config?.activeSymbols?.[0] || 'PERP_BTC_USDC'
 	);
-	const [filterType, setFilterType] = useState<Signal['type'] | 'ALL'>('ALL');
+	const [selectedTypes, setSelectedTypes] = useState<Signal['type'][]>([]);
+
+	// Initialize with all types selected
+	useEffect(() => {
+		if (selectedTypes.length === 0) {
+			setSelectedTypes(SIGNAL_TYPES);
+		}
+	}, [selectedTypes.length]);
 
 	// Pagination state - cursor history for previous/next navigation
 	const [cursorHistory, setCursorHistory] = useState<string[]>([]);
@@ -48,8 +75,11 @@ export function Signals() {
 
 	const hasPrev = cursorHistory.length > 0;
 
-	const filteredSignals =
-		filterType === 'ALL' ? signals : signals.filter((s) => s.type === filterType);
+	// Filter signals based on selected types
+	const filteredSignals = useMemo(() => {
+		if (selectedTypes.length === 0) return signals;
+		return signals.filter((signal) => selectedTypes.includes(signal.type));
+	}, [signals, selectedTypes]);
 
 	// Reset pagination when symbol changes
 	const handleSymbolChange = (symbol: string) => {
@@ -58,16 +88,28 @@ export function Signals() {
 		setCursorHistory([]);
 	};
 
-	const typeFilters: { value: Signal['type'] | 'ALL'; label: string }[] = [
-		{ value: 'ALL', label: 'All' },
-		{ value: 'ENTRY', label: 'Entry' },
-		{ value: 'EXIT', label: 'Exit' },
-		{ value: 'STOP_LOSS', label: 'Stop Loss' },
-		{ value: 'TAKE_PROFIT', label: 'Take Profit' },
-		{ value: 'ADJUSTMENT', label: 'Adjustment' },
-		{ value: 'HOLD', label: 'Hold' },
-		{ value: 'NO_ACTION', label: 'No Action' }
-	];
+	// Toggle type selection
+	const toggleType = (type: Signal['type']) => {
+		setSelectedTypes((prev) => {
+			const isSelected = prev.includes(type);
+			if (isSelected) {
+				// Don't allow deselecting all types
+				if (prev.length === 1) return prev;
+				return prev.filter((t) => t !== type);
+			}
+			return [...prev, type];
+		});
+		// Reset pagination when filter changes
+		setCurrentCursor(undefined);
+		setCursorHistory([]);
+	};
+
+	// Select all types
+	const selectAllTypes = () => {
+		setSelectedTypes(SIGNAL_TYPES);
+		setCurrentCursor(undefined);
+		setCursorHistory([]);
+	};
 
 	return (
 		<div className="space-y-6">
@@ -90,21 +132,45 @@ export function Signals() {
 				</select>
 			</div>
 
-			{/* Filter Tabs */}
-			<div className="flex flex-wrap gap-2">
-				{typeFilters.map((filter) => (
+			{/* Filter by Type */}
+			<div className="card">
+				<div className="flex items-center justify-between mb-4">
+					<h3 className="font-semibold text-text">Filter by Type</h3>
 					<button
-						key={filter.value}
-						onClick={() => setFilterType(filter.value)}
-						className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-							filterType === filter.value
-								? 'bg-primary text-white'
-								: 'bg-surface text-text-muted hover:text-text hover:bg-surface-hover'
-						}`}
+						onClick={selectAllTypes}
+						className="text-sm text-primary hover:text-primary-hover transition-colors"
+						disabled={selectedTypes.length === SIGNAL_TYPES.length}
 					>
-						{filter.label}
+						Select All
 					</button>
-				))}
+				</div>
+				<div className="flex flex-wrap gap-3">
+					{SIGNAL_TYPES.map((type) => {
+						const isSelected = selectedTypes.includes(type);
+						return (
+							<label
+								key={type}
+								className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all ${
+									isSelected
+										? 'bg-surface-hover ring-2 ring-primary'
+										: 'bg-surface opacity-50 hover:opacity-75'
+								}`}
+							>
+								<input
+									type="checkbox"
+									checked={isSelected}
+									onChange={() => toggleType(type)}
+									className="w-4 h-4 rounded border-border bg-surface text-primary focus:ring-primary focus:ring-offset-0"
+								/>
+								<span
+									className={`text-sm font-medium ${isSelected ? 'text-text' : 'text-text-muted'}`}
+								>
+									{typeConfig[type].label}
+								</span>
+							</label>
+						);
+					})}
+				</div>
 			</div>
 
 			{isLoading ? (

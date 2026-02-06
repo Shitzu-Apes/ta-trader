@@ -37,72 +37,147 @@ export function SignalBadge({ signal }: SignalBadgeProps) {
 
 	return (
 		<div className="card border-l-4 border-l-primary">
-			<div className="flex items-start justify-between">
-				<div className="flex-1">
-					<div className="flex items-center gap-2 mb-2">
+			{/* Top Row: Type + Direction | Individual Scores */}
+			<div className="flex items-center justify-between mb-2">
+				<div className="flex items-center gap-2 flex-wrap">
+					{signal.type === 'ADJUSTMENT' && signal.action ? (
 						<span
 							className={`px-2 py-1 rounded text-xs font-medium border ${typeColors[signal.type]}`}
 						>
-							{signal.type}
+							{signal.action} {signal.direction}
 						</span>
-						<span className={`text-sm font-medium ${directionColors[signal.direction]}`}>
-							{signal.direction}
-						</span>
-						<span className="text-xs text-text-muted">{formatTime(signal.timestamp)}</span>
-					</div>
-
-					<p className="text-sm text-text mb-1">{signal.action}</p>
-					<p className="text-xs text-text-muted">{signal.reason}</p>
-
-					{signal.type === 'ENTRY' && (
-						<div className="mt-3 flex items-center gap-4 text-xs">
-							<span className="text-text-muted">
-								Price: <span className="text-text">{formatCurrency(signal.price, 2)}</span>
+					) : (
+						<>
+							<span
+								className={`px-2 py-1 rounded text-xs font-medium border ${typeColors[signal.type]}`}
+							>
+								{signal.type}
 							</span>
-							<span className="text-text-muted">
-								TA Score: <span className="text-text">{formatScore(signal.taScore, 2)}</span>
+							<span className={`text-sm font-medium ${directionColors[signal.direction]}`}>
+								{signal.direction}
 							</span>
-						</div>
+						</>
 					)}
-
-					{(signal.type === 'EXIT' ||
-						signal.type === 'STOP_LOSS' ||
-						signal.type === 'TAKE_PROFIT') &&
-						signal.unrealizedPnl !== undefined && (
-							<div className="mt-3 flex items-center gap-4 text-xs">
-								<span className="text-text-muted">
-									PnL:{' '}
-									<span className={signal.unrealizedPnl >= 0 ? 'text-success' : 'text-danger'}>
-										{formatCurrency(signal.unrealizedPnl, 2)}
-									</span>
-								</span>
-							</div>
-						)}
 				</div>
 
-				<div className="ml-4 text-right">
-					<div className="text-2xl font-bold text-text">{formatNumber(signal.taScore, 1)}</div>
-					<div className="text-xs text-text-muted">TA Score</div>
-				</div>
+				{/* Individual Scores */}
+				{indicators && (
+					<div className="flex items-center gap-3 text-xs">
+						<span className={getScoreColor(indicators.vwap)}>
+							VWAP {formatScore(indicators.vwap, 1)}
+						</span>
+						<span className={getScoreColor(indicators.bbands)}>
+							BB {formatScore(indicators.bbands, 1)}
+						</span>
+						<span className={getScoreColor(indicators.rsi)}>
+							RSI {formatScore(indicators.rsi, 1)}
+						</span>
+						<span className={getScoreColor(indicators.obv)}>
+							OBV {formatScore(indicators.obv, 1)}
+						</span>
+					</div>
+				)}
 			</div>
 
-			{/* Individual Scores Breakdown - Always Visible */}
-			{indicators && (
-				<div className="mt-3 pt-2 border-t border-surface/50 flex gap-4 text-xs">
-					<span className={getScoreColor(indicators.vwap)}>
-						VWAP: {formatScore(indicators.vwap, 1)}
+			{/* Info Row: Score + Price + Threshold + Reason */}
+			<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm mb-2">
+				<span className="text-text-muted">
+					Score:{' '}
+					<span className={`font-medium ${getScoreColor(signal.taScore)}`}>
+						{formatScore(signal.taScore, 2)}
 					</span>
-					<span className={getScoreColor(indicators.bbands)}>
-						BBands: {formatScore(indicators.bbands, 1)}
+				</span>
+				<span className="text-text-muted">
+					Price: <span className="text-text">{formatCurrency(signal.price, 2)}</span>
+				</span>
+				<span className="text-text-muted">
+					Threshold:{' '}
+					<span className={getScoreColor(signal.threshold)}>
+						{formatScore(signal.threshold, 2)}
 					</span>
-					<span className={getScoreColor(indicators.rsi)}>
-						RSI: {formatScore(indicators.rsi, 1)}
+				</span>
+				{signal.reason && signal.reason.trim() !== '' && (
+					<span className="text-text-muted">
+						Reason: <span className="text-text">{signal.reason}</span>
 					</span>
-					<span className={getScoreColor(indicators.obv)}>
-						OBV: {formatScore(indicators.obv, 1)}
+				)}
+			</div>
+
+			{/* Position Info Row */}
+			<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm mb-2">
+				{signal.positionSize !== undefined && signal.positionSize !== 0 && (
+					<span className="text-text-muted">
+						Size: <span className="text-text">{formatNumber(signal.positionSize, 2)}</span>
 					</span>
+				)}
+				{signal.entryPrice !== undefined && signal.entryPrice !== 0 && (
+					<span className="text-text-muted">
+						Entry: <span className="text-text">{formatCurrency(signal.entryPrice, 2)}</span>
+					</span>
+				)}
+				{/* Adjustment details */}
+				{signal.type === 'ADJUSTMENT' && signal.currentSize !== undefined && (
+					<span className="text-text-muted">
+						Current: <span className="text-text">{formatNumber(signal.currentSize, 2)}</span>
+					</span>
+				)}
+				{signal.type === 'ADJUSTMENT' && signal.targetSize !== undefined && (
+					<span className="text-text-muted">
+						Target: <span className="text-text">{formatNumber(signal.targetSize, 2)}</span>
+					</span>
+				)}
+				{signal.intensity !== undefined && (
+					<span className="text-text-muted">
+						Intensity: <span className="text-text">{formatNumber(signal.intensity, 2)}</span>
+					</span>
+				)}
+			</div>
+
+			{/* PnL Row for exit signals - unrealized becomes realized when position is closed */}
+			{(signal.type === 'EXIT' || signal.type === 'STOP_LOSS' || signal.type === 'TAKE_PROFIT') &&
+				(signal.unrealizedPnl !== undefined || signal.realizedPnl !== undefined) && (
+					<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm mb-2">
+						{/* For closed positions, show the final PnL as Realized (the unrealized value at close becomes realized) */}
+						{signal.unrealizedPnl !== undefined && (
+							<span className="text-text-muted">
+								PnL:{' '}
+								<span className={signal.unrealizedPnl >= 0 ? 'text-success' : 'text-danger'}>
+									{formatCurrency(signal.unrealizedPnl, 2)}
+								</span>
+							</span>
+						)}
+					</div>
+				)}
+
+			{/* Score Multipliers Row */}
+			{(signal.profitScore !== undefined || signal.timeDecayScore !== undefined) && (
+				<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm mb-2">
+					{signal.profitScore !== undefined && (
+						<span className="text-text-muted">
+							Profit Score:{' '}
+							<span className={getScoreColor(signal.profitScore)}>
+								{formatScore(signal.profitScore, 2)}
+							</span>
+						</span>
+					)}
+					{signal.timeDecayScore !== undefined && (
+						<span className="text-text-muted">
+							Time Decay:{' '}
+							<span className={getScoreColor(signal.timeDecayScore)}>
+								{formatScore(signal.timeDecayScore, 2)}
+							</span>
+						</span>
+					)}
+					{signal.availableLeverage !== undefined && (
+						<span className="text-text-muted">
+							Leverage: <span className="text-text">{signal.availableLeverage}x</span>
+						</span>
+					)}
 				</div>
 			)}
+
+			{/* Bottom: Timestamp */}
+			<div className="text-xs text-text-muted">{formatTime(signal.timestamp)}</div>
 		</div>
 	);
 }

@@ -8,11 +8,12 @@ export const formatCurrency = (value: number | null | undefined, decimals = 2): 
 	}).format(value);
 };
 
-export const formatNumber = (value: number | null | undefined, decimals = 2): string => {
+export const formatNumber = (value: number | null | undefined, _decimals = 2): string => {
 	if (value === undefined || value === null) return '-';
 	return new Intl.NumberFormat('en-US', {
-		minimumFractionDigits: decimals,
-		maximumFractionDigits: decimals
+		notation: 'compact',
+		compactDisplay: 'short',
+		maximumSignificantDigits: 4
 	}).format(value);
 };
 
