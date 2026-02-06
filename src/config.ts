@@ -28,10 +28,10 @@ export const BASE_TRADING_CONFIG = {
 	SUPPORTED_SYMBOLS: ALL_PERP_SYMBOLS,
 
 	// Technical Analysis Multipliers
-	VWAP_MULTIPLIER: 0.2,
-	BBANDS_MULTIPLIER: 1.5,
+	VWAP_MULTIPLIER: 0.15,
+	BBANDS_MULTIPLIER: 1.2,
 	RSI_MULTIPLIER: 2.0,
-	OBV_DIVERGENCE_MULTIPLIER: 0.8,
+	OBV_DIVERGENCE_MULTIPLIER: 1.2,
 
 	// Technical Analysis Parameters
 	VWAP_THRESHOLD: 0.01,
@@ -57,15 +57,15 @@ export const MAX_ORDER_SIZE_USD: Record<PerpSymbol, number> = {
 
 // Max leverage per symbol (how much leverage to use for each symbol)
 export const MAX_LEVERAGE_PER_SYMBOL: Record<PerpSymbol, number> = {
-	[PERP_SYMBOLS.BTC]: 8,
-	[PERP_SYMBOLS.ETH]: 8,
-	[PERP_SYMBOLS.SOL]: 6,
-	[PERP_SYMBOLS.BNB]: 6,
-	[PERP_SYMBOLS.NEAR]: 5
+	[PERP_SYMBOLS.BTC]: 6,
+	[PERP_SYMBOLS.ETH]: 6,
+	[PERP_SYMBOLS.SOL]: 5,
+	[PERP_SYMBOLS.BNB]: 5,
+	[PERP_SYMBOLS.NEAR]: 4
 };
 
 // Max total account leverage across all positions
-export const MAX_ACCOUNT_LEVERAGE = 12;
+export const MAX_ACCOUNT_LEVERAGE = 10;
 
 // Position sizing configuration
 export const POSITION_SIZING_CONFIG = {
