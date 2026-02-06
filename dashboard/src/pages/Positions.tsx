@@ -186,6 +186,9 @@ export function Positions() {
 										Realized PnL
 									</th>
 									<th className="text-left py-3 px-4 text-sm font-medium text-text-muted">
+										Opened
+									</th>
+									<th className="text-left py-3 px-4 text-sm font-medium text-text-muted">
 										Closed
 									</th>
 								</tr>
@@ -225,6 +228,9 @@ export function Positions() {
 											}`}
 										>
 											{formatCurrency(position.realizedPnl, 2)}
+										</td>
+										<td className="py-3 px-4 text-text-muted text-sm">
+											{position.openedAt ? dayjs(position.openedAt).format('lll') : '-'}
 										</td>
 										<td className="py-3 px-4 text-text-muted text-sm">
 											{position.closedAt ? dayjs(position.closedAt).format('lll') : '-'}
