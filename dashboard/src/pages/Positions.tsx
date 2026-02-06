@@ -68,6 +68,9 @@ export function Positions() {
 										Mark Price
 									</th>
 									<th className="text-left py-3 px-4 text-sm font-medium text-text-muted">
+										Notional
+									</th>
+									<th className="text-left py-3 px-4 text-sm font-medium text-text-muted">
 										Unrealized PnL
 									</th>
 								</tr>

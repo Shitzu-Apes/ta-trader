@@ -65,7 +65,7 @@ export const MAX_LEVERAGE_PER_SYMBOL: Record<PerpSymbol, number> = {
 };
 
 // Max total account leverage across all positions
-export const MAX_ACCOUNT_LEVERAGE = 5;
+export const MAX_ACCOUNT_LEVERAGE = 8;
 
 // Position sizing configuration
 export const POSITION_SIZING_CONFIG = {

@@ -28,6 +28,9 @@ export function PositionRow({ position }: PositionRowProps) {
 			<td className="py-4 px-4 text-text">{formatNumber(position.size, 4)}</td>
 			<td className="py-4 px-4 text-text-muted">{formatCurrency(position.entryPrice, 2)}</td>
 			<td className="py-4 px-4 text-text">{formatCurrency(position.markPrice, 2)}</td>
+			<td className="py-4 px-4 text-text">
+				{formatCurrency(position.size * position.markPrice, 2)}
+			</td>
 			<td className={`py-4 px-4 font-medium ${isProfit ? 'text-success' : 'text-danger'}`}>
 				{formatCurrency(position.unrealizedPnl, 2)}
 				<span className="text-xs ml-1">({formatPercent(pnlPercent)})</span>
