@@ -42,6 +42,16 @@ const positionHistoryCache = new Map<
 >();
 
 const CACHE_TTL_MS = 30000; // 30 seconds
+const DAILY_PNL_CACHE_TTL_MS = 300000; // 5 minutes for daily PnL
+
+// Cache for daily PnL calculation
+const dailyPnlCache = new Map<
+	string,
+	{
+		value: number;
+		timestamp: number;
+	}
+>();
 
 // Helper function to get the current 5-minute timeframe
 export function getCurrentTimeframe() {
@@ -438,20 +448,27 @@ app.get('/portfolio', async (c) => {
 	try {
 		const adapter = getAdapter(c.env);
 
-		// Get current balance
-		const balance = await adapter.getBalance();
+		// Run balance and positions in parallel
+		const [balance, positions] = await Promise.all([adapter.getBalance(), adapter.getPositions()]);
 
-		// Get all positions
-		const positions = await adapter.getPositions();
-
-		// Calculate daily realized PnL (last 24 hours)
+		// Calculate daily realized PnL (last 24 hours) with caching
 		let dailyPnl = 0;
 		try {
-			const history = await adapter.getPositionHistory?.(undefined, 1000);
-			if (history?.history) {
-				const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-				const yesterdayTrades = history.history.filter((pos) => pos.closedAt >= oneDayAgo);
-				dailyPnl = yesterdayTrades.reduce((sum, pos) => sum + pos.realizedPnl, 0);
+			const now = Date.now();
+			const cacheKey = 'portfolio_daily_pnl';
+			const cached = dailyPnlCache.get(cacheKey);
+
+			if (cached && now - cached.timestamp < DAILY_PNL_CACHE_TTL_MS) {
+				dailyPnl = cached.value;
+			} else {
+				const history = await adapter.getPositionHistory?.(undefined, 1000);
+				if (history?.history) {
+					const oneDayAgo = now - 24 * 60 * 60 * 1000;
+					const yesterdayTrades = history.history.filter((pos) => pos.closedAt >= oneDayAgo);
+					dailyPnl = yesterdayTrades.reduce((sum, pos) => sum + pos.realizedPnl, 0);
+				}
+				// Update cache
+				dailyPnlCache.set(cacheKey, { value: dailyPnl, timestamp: now });
 			}
 		} catch (e) {
 			console.error('Error calculating daily PnL:', e);
