@@ -1,8 +1,10 @@
-import { Wallet, TrendingUp, AlertCircle, Activity } from 'lucide-react';
+import { useQueries } from '@tanstack/react-query';
+import { Wallet, AlertCircle, Activity, TrendingUp, TrendingDown } from 'lucide-react';
 
 import { StatCard } from '@/components/StatCard';
 import { usePortfolio, useConfig, useLogs, usePositionHistory } from '@/hooks/useApi';
 import { formatCurrency, formatPercent, formatNumber } from '@/lib/format';
+import { api } from '@/services/api';
 
 export function Overview() {
 	const { data: portfolio, isLoading: portfolioLoading } = usePortfolio();
@@ -15,6 +17,18 @@ export function Overview() {
 	const activePositions = portfolio?.positions?.filter((p) => p.size > 0) || [];
 	const totalPnl = activePositions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
 	const errorCount = logs?.logs?.filter((l) => l.level === 'ERROR').length || 0;
+
+	// Fetch latest data for all tracked symbols
+	const activeSymbols = config?.activeSymbols || [];
+	const latestDataQueries = useQueries({
+		queries: activeSymbols.map((symbol) => ({
+			queryKey: ['latest', symbol],
+			queryFn: () => api.getLatest(symbol),
+			refetchInterval: 30000,
+			staleTime: 25000,
+			enabled: !!symbol
+		}))
+	});
 
 	// Calculate 24h PnL per symbol
 	const calculate24hPnlPerSymbol = () => {
@@ -34,6 +48,31 @@ export function Overview() {
 	};
 
 	const pnl24hBySymbol = calculate24hPnlPerSymbol();
+
+	// Build symbol summary data
+	const symbolSummary = activeSymbols.map((symbol, index) => {
+		const latestData = latestDataQueries[index]?.data;
+		const position = activePositions.find((p) => p.symbol === symbol);
+		const pnl24h = pnl24hBySymbol[symbol] || 0;
+
+		return {
+			symbol: symbol.replace('PERP_', '').replace('_USDC', ''),
+			fullSymbol: symbol,
+			price: latestData?.indicators?.candle?.close || 0,
+			position: position
+				? {
+						side: position.isLong ? 'LONG' : 'SHORT',
+						size: position.size,
+						unrealizedPnl: position.unrealizedPnl,
+						entryPrice: position.entryPrice
+					}
+				: null,
+			pnl24h
+		};
+	});
+
+	// Sort by 24h PnL (descending)
+	const sortedSymbols = [...symbolSummary].sort((a, b) => b.pnl24h - a.pnl24h);
 
 	if (isLoading) {
 		return (
@@ -66,7 +105,7 @@ export function Overview() {
 			</div>
 
 			{/* Stats Grid */}
-			<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+			<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 				<StatCard
 					title="Balance"
 					value={formatCurrency(portfolio?.balance, 2)}
@@ -80,13 +119,6 @@ export function Overview() {
 					}
 					trendValue={`24h: ${formatCurrency(portfolio?.dailyPnl || 0, 2)}`}
 					icon={<Wallet className="h-5 w-5 text-primary" />}
-				/>
-
-				<StatCard
-					title="Active Positions"
-					value={activePositions.length}
-					subtitle={`of ${config?.activeSymbols?.length || 0} symbols monitored`}
-					icon={<TrendingUp className="h-5 w-5 text-primary" />}
 				/>
 
 				<StatCard
@@ -106,10 +138,116 @@ export function Overview() {
 				/>
 			</div>
 
-			{/* Active Positions Summary */}
+			{/* Symbol Summary */}
+			{sortedSymbols.length > 0 && (
+				<div>
+					<h2 className="text-lg font-semibold text-text mb-4">Symbol Summary</h2>
+					<div className="flex flex-wrap justify-between gap-4">
+						{sortedSymbols.map((symbolData) => (
+							<div
+								key={symbolData.fullSymbol}
+								className={`card p-4 min-w-[180px] flex-1 ${
+									symbolData.position ? 'ring-1 ring-primary/30 bg-primary/5' : ''
+								}`}
+							>
+								{/* Header */}
+								<div className="flex items-center justify-between mb-3">
+									<h3 className="font-semibold text-text">{symbolData.symbol}</h3>
+									{symbolData.position ? (
+										<span
+											className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+												symbolData.position.side === 'LONG'
+													? 'bg-success/20 text-success border border-success/30'
+													: 'bg-danger/20 text-danger border border-danger/30'
+											}`}
+										>
+											{symbolData.position.side}
+										</span>
+									) : (
+										<span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-surface text-text-muted border border-border">
+											No Position
+										</span>
+									)}
+								</div>
+
+								{/* Current Price */}
+								<div className="mb-3">
+									<p className="text-xs text-text-muted">Current Price</p>
+									<p className="text-lg font-medium text-text">
+										{symbolData.price > 0 ? formatCurrency(symbolData.price, 2) : '-'}
+									</p>
+								</div>
+
+								{/* 24h Realized PnL */}
+								<div className="mb-3">
+									<p className="text-xs text-text-muted">24h Realized PnL</p>
+									<div className="flex items-center gap-1">
+										{symbolData.pnl24h !== 0 && (
+											<>
+												{symbolData.pnl24h > 0 ? (
+													<TrendingUp className="h-4 w-4 text-success" />
+												) : (
+													<TrendingDown className="h-4 w-4 text-danger" />
+												)}
+											</>
+										)}
+										<p
+											className={`font-medium ${
+												symbolData.pnl24h > 0
+													? 'text-success'
+													: symbolData.pnl24h < 0
+														? 'text-danger'
+														: 'text-text-muted'
+											}`}
+										>
+											{formatCurrency(symbolData.pnl24h, 2)}
+										</p>
+									</div>
+								</div>
+
+								{/* Unrealized PnL (only if active position) */}
+								{symbolData.position && (
+									<div>
+										<p className="text-xs text-text-muted">Unrealized PnL</p>
+										<div className="flex items-center gap-1">
+											{symbolData.position.unrealizedPnl !== 0 && (
+												<>
+													{symbolData.position.unrealizedPnl > 0 ? (
+														<TrendingUp className="h-4 w-4 text-success" />
+													) : (
+														<TrendingDown className="h-4 w-4 text-danger" />
+													)}
+												</>
+											)}
+											<p
+												className={`font-medium ${
+													symbolData.position.unrealizedPnl > 0
+														? 'text-success'
+														: symbolData.position.unrealizedPnl < 0
+															? 'text-danger'
+															: 'text-text-muted'
+												}`}
+											>
+												{formatCurrency(symbolData.position.unrealizedPnl, 2)}
+											</p>
+										</div>
+										{symbolData.position.size > 0 && (
+											<p className="text-xs text-text-muted mt-1">
+												Size: {formatNumber(symbolData.position.size, 4)}
+											</p>
+										)}
+									</div>
+								)}
+							</div>
+						))}
+					</div>
+				</div>
+			)}
+
+			{/* Active Positions Table */}
 			{activePositions.length > 0 && (
 				<div className="card">
-					<h2 className="text-lg font-semibold text-text mb-4">Active Positions Summary</h2>
+					<h2 className="text-lg font-semibold text-text mb-4">Active Positions</h2>
 					<div className="overflow-x-auto">
 						<table className="w-full">
 							<thead>
@@ -131,9 +269,6 @@ export function Overview() {
 									<th className="text-left py-2 px-4 text-sm font-medium text-text-muted">
 										Unrealized PnL
 									</th>
-									<th className="text-left py-2 px-4 text-sm font-medium text-text-muted">
-										24h Realized PnL
-									</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -141,7 +276,6 @@ export function Overview() {
 									const pnlPercent =
 										((position.markPrice - position.entryPrice) / position.entryPrice) * 100;
 									const isProfit = position.unrealizedPnl >= 0;
-									const pnl24h = pnl24hBySymbol[position.symbol] || 0;
 
 									return (
 										<tr key={position.symbol} className="border-b border-border last:border-b-0">
@@ -174,17 +308,6 @@ export function Overview() {
 											>
 												{formatCurrency(position.unrealizedPnl, 2)}
 												<span className="text-xs ml-1">({formatPercent(pnlPercent)})</span>
-											</td>
-											<td
-												className={`py-3 px-4 font-medium ${
-													pnl24h > 0
-														? 'text-success'
-														: pnl24h < 0
-															? 'text-danger'
-															: 'text-text-muted'
-												}`}
-											>
-												{pnl24h !== 0 ? formatCurrency(pnl24h, 2) : '-'}
 											</td>
 										</tr>
 									);

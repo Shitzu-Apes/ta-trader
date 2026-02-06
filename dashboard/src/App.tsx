@@ -2,8 +2,8 @@ import { Routes, Route } from 'react-router-dom';
 
 import { Layout } from '@/components/Layout';
 import { Logs } from '@/pages/Logs';
-import { Markets } from '@/pages/Markets';
 import { MarketDetail } from '@/pages/MarketDetail';
+import { Markets } from '@/pages/Markets';
 import { Orders } from '@/pages/Orders';
 import { Overview } from '@/pages/Overview';
 import { Positions } from '@/pages/Positions';
