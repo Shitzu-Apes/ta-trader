@@ -13,6 +13,7 @@ mode = "smart"
 # Static assets for dashboard
 [assets]
 directory = "./dashboard/dist"
+binding = "ASSETS"
 html_handling = "force-trailing-slash"
 not_found_handling = "single-page-application"
 

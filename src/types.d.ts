@@ -1,4 +1,4 @@
-import { D1Database, KVNamespace } from '@cloudflare/workers-types/experimental';
+import { D1Database, Fetcher, KVNamespace } from '@cloudflare/workers-types/experimental';
 
 export interface EnvBindings {
 	TAAPI_SECRET: string;
@@ -13,4 +13,7 @@ export interface EnvBindings {
 	ORDERLY_ACCOUNT_ID: string;
 	ORDERLY_PRIVATE_KEY: string;
 	ORDERLY_NETWORK: 'testnet' | 'mainnet';
+
+	// Static assets binding for SPA
+	ASSETS: Fetcher;
 }

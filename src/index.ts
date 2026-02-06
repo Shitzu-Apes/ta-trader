@@ -87,8 +87,18 @@ app.onError(async (err, c) => {
 	});
 });
 
-app.notFound(() => {
-	return new Response(null, { status: 404 });
+app.notFound(async (c) => {
+	// For non-API routes, serve index.html to support SPA routing
+	const url = new URL(c.req.url);
+	if (!url.pathname.startsWith('/api/')) {
+		const env = c.env as EnvBindings;
+		const asset = await env.ASSETS.fetch(`${url.origin}/index.html`);
+		if (asset.status === 200) {
+			const html = await asset.text();
+			return c.html(html);
+		}
+	}
+	return c.notFound();
 });
 
 async function updateIndicatorsAndTrade(env: EnvBindings) {
