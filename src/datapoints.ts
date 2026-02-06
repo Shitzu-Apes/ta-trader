@@ -443,6 +443,32 @@ app.get('/position-history', async (c) => {
 	}
 });
 
+// Get orders with filters
+app.get('/orders', async (c) => {
+	try {
+		const adapter = getAdapter(c.env);
+
+		// Default to last 30 days if no time range specified
+		const endTime = Date.now();
+		const startTime = endTime - 30 * 24 * 60 * 60 * 1000;
+
+		const result = await adapter.getOrders?.(undefined, startTime, endTime);
+
+		if (!result) {
+			return c.json({
+				orders: [],
+				total: 0
+			});
+		}
+
+		return c.json(result);
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		console.error('Error getting orders:', errorMessage);
+		return c.json({ error: 'Internal server error', details: errorMessage }, 500);
+	}
+});
+
 // Get portfolio summary (balance + positions)
 app.get('/portfolio', async (c) => {
 	try {

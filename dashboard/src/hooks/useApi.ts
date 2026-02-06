@@ -96,3 +96,12 @@ export function usePositionHistory(page = 1, limit = 10) {
 		staleTime: 25000
 	});
 }
+
+export function useOrders(page = 1, limit = 25, symbol?: string) {
+	return useQuery({
+		queryKey: ['orders', page, limit, symbol],
+		queryFn: () => api.getOrders(page, limit, symbol),
+		refetchInterval: REFRESH_INTERVAL,
+		staleTime: 25000
+	});
+}

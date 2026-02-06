@@ -112,6 +112,31 @@ export type TradeResult = AmmTradeResult | OrderbookTradeResult | HybridTradeRes
 
 export type OrderType = 'market' | 'limit';
 
+// Order status from Orderly
+export type OrderStatus =
+	| 'NEW'
+	| 'CANCELLED'
+	| 'PARTIAL_FILLED'
+	| 'FILLED'
+	| 'REJECTED'
+	| 'INCOMPLETE'
+	| 'COMPLETED';
+
+// Order interface
+export interface Order {
+	orderId: string;
+	symbol: string;
+	side: 'BUY' | 'SELL';
+	orderType: 'MARKET' | 'LIMIT';
+	status: OrderStatus;
+	size: number;
+	price: number | null;
+	filledSize: number;
+	avgPrice: number | null;
+	createdAt: number;
+	updatedAt: number;
+}
+
 interface BaseTradeOptions {
 	price?: number;
 	slippage?: number;
@@ -249,6 +274,16 @@ export interface TradingAdapter {
 	getSupportedMarkets?(): Promise<string[]>;
 	getMinimumTradeSize?(symbol: string): Promise<number>;
 	getFees?(symbol: string): Promise<Fees>;
+
+	// Order Management
+	getOrders?(
+		symbol?: string,
+		startTime?: number,
+		endTime?: number
+	): Promise<{
+		orders: Order[];
+		total: number;
+	}>;
 }
 
 // Symbol step size cache to avoid repeated API calls

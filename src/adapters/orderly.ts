@@ -10,6 +10,8 @@ import {
 	LiquidityDepth,
 	TradeOptions,
 	TradeResult,
+	Order,
+	OrderStatus,
 	getStepSize,
 	roundQuantityToStepSize
 } from './index';
@@ -57,6 +59,31 @@ interface OrderlyPositionHistory {
 	close_timestamp: number;
 	last_update_timestamp: number;
 	leverage: number;
+}
+
+// Orderly order response type (from /v1/orders)
+interface OrderlyOrder {
+	order_id: number;
+	symbol: string;
+	client_order_id?: string | null;
+	side: 'BUY' | 'SELL';
+	type: 'MARKET' | 'LIMIT';
+	price: number | null;
+	quantity: number;
+	amount: number | null;
+	visible: number;
+	visible_quantity: number;
+	executed: number;
+	total_executed_quantity: number;
+	total_fee: number;
+	fee_asset: string;
+	status: OrderStatus;
+	created_time: number;
+	updated_time: number;
+	average_executed_price: number | null;
+	reduce_only: boolean | null;
+	order_tag: string | null;
+	realized_pnl: number;
 }
 
 interface OrderlyHolding {
@@ -665,5 +692,90 @@ export class OrderlyAdapter implements TradingAdapter {
 			makerFee: response.data.maker_fee_rate,
 			takerFee: response.data.taker_fee_rate
 		};
+	}
+
+	async getOrders(
+		symbol?: string,
+		startTime?: number,
+		endTime?: number
+	): Promise<{
+		orders: Order[];
+		total: number;
+	}> {
+		const logger = getLogger(this.env);
+		const ctx = createContext(symbol || 'all', 'get_orders');
+
+		try {
+			// Build query params manually to preserve comma formatting
+			// Orderly API expects commas NOT to be URL-encoded in the signature
+			const queryParts: string[] = [];
+			if (symbol) {
+				queryParts.push(`symbol=${symbol}`);
+			}
+			// Always filter for FILLED orders only since we only send market orders
+			queryParts.push('status=FILLED');
+			// Always fetch max size (500) for client-side pagination
+			queryParts.push('size=500');
+			if (startTime) {
+				queryParts.push(`start_t=${startTime}`);
+			}
+			if (endTime) {
+				queryParts.push(`end_t=${endTime}`);
+			}
+
+			const path = `/v1/orders?${queryParts.join('&')}`;
+
+			const response = await makeOrderlyRequest<{
+				success: boolean;
+				data?: {
+					rows?: OrderlyOrder[];
+					meta?: {
+						total: number;
+						records_per_page: number;
+						current_page: number;
+					};
+				};
+			}>(this.env, 'GET', path);
+
+			if (!response.success || !response.data?.rows) {
+				logger.warn('No orders data returned', ctx);
+				return {
+					orders: [],
+					total: 0
+				};
+			}
+
+			const orders: Order[] = response.data.rows.map((order) => ({
+				orderId: order.order_id?.toString() ?? '',
+				symbol: order.symbol ?? '',
+				side: order.side ?? 'BUY',
+				orderType: order.type ?? 'MARKET',
+				status: order.status ?? 'NEW',
+				size: order.quantity ?? 0,
+				price: order.price ?? null,
+				filledSize: order.executed ?? 0,
+				avgPrice: order.average_executed_price ?? null,
+				realizedPnl: order.realized_pnl ?? 0,
+				totalFee: order.total_fee ?? 0,
+				createdAt: order.created_time ?? 0,
+				updatedAt: order.updated_time ?? 0
+			}));
+
+			const meta = response.data.meta;
+			const total = meta?.total || orders.length;
+
+			logger.info('Orders retrieved', ctx, {
+				count: orders.length,
+				total
+			});
+
+			return {
+				orders,
+				total
+			};
+		} catch (error) {
+			logger.error('Failed to get orders', error as Error, ctx);
+			throw error;
+		}
 	}
 }

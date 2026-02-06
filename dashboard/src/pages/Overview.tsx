@@ -1,19 +1,39 @@
 import { Wallet, TrendingUp, AlertCircle, Activity } from 'lucide-react';
 
 import { StatCard } from '@/components/StatCard';
-import { usePortfolio, useConfig, useLogs } from '@/hooks/useApi';
+import { usePortfolio, useConfig, useLogs, usePositionHistory } from '@/hooks/useApi';
 import { formatCurrency, formatPercent, formatNumber } from '@/lib/format';
 
 export function Overview() {
 	const { data: portfolio, isLoading: portfolioLoading } = usePortfolio();
 	const { data: config, isLoading: configLoading } = useConfig();
 	const { data: logs, isLoading: logsLoading } = useLogs(50);
+	const { data: positionHistoryData, isLoading: historyLoading } = usePositionHistory(1, 1000);
 
-	const isLoading = portfolioLoading || configLoading || logsLoading;
+	const isLoading = portfolioLoading || configLoading || logsLoading || historyLoading;
 
 	const activePositions = portfolio?.positions?.filter((p) => p.size > 0) || [];
 	const totalPnl = activePositions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
 	const errorCount = logs?.logs?.filter((l) => l.level === 'ERROR').length || 0;
+
+	// Calculate 24h PnL per symbol
+	const calculate24hPnlPerSymbol = () => {
+		const history = positionHistoryData?.history || [];
+		const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+		const yesterdayTrades = history.filter((pos) => pos.closedAt >= oneDayAgo);
+
+		const pnlBySymbol: Record<string, number> = {};
+		yesterdayTrades.forEach((pos) => {
+			if (!pnlBySymbol[pos.symbol]) {
+				pnlBySymbol[pos.symbol] = 0;
+			}
+			pnlBySymbol[pos.symbol] += pos.realizedPnl;
+		});
+
+		return pnlBySymbol;
+	};
+
+	const pnl24hBySymbol = calculate24hPnlPerSymbol();
 
 	if (isLoading) {
 		return (
@@ -108,7 +128,12 @@ export function Overview() {
 									<th className="text-left py-2 px-4 text-sm font-medium text-text-muted">
 										Notional
 									</th>
-									<th className="text-left py-2 px-4 text-sm font-medium text-text-muted">PnL</th>
+									<th className="text-left py-2 px-4 text-sm font-medium text-text-muted">
+										Unrealized PnL
+									</th>
+									<th className="text-left py-2 px-4 text-sm font-medium text-text-muted">
+										24h Realized PnL
+									</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -116,6 +141,7 @@ export function Overview() {
 									const pnlPercent =
 										((position.markPrice - position.entryPrice) / position.entryPrice) * 100;
 									const isProfit = position.unrealizedPnl >= 0;
+									const pnl24h = pnl24hBySymbol[position.symbol] || 0;
 
 									return (
 										<tr key={position.symbol} className="border-b border-border last:border-b-0">
@@ -148,6 +174,17 @@ export function Overview() {
 											>
 												{formatCurrency(position.unrealizedPnl, 2)}
 												<span className="text-xs ml-1">({formatPercent(pnlPercent)})</span>
+											</td>
+											<td
+												className={`py-3 px-4 font-medium ${
+													pnl24h > 0
+														? 'text-success'
+														: pnl24h < 0
+															? 'text-danger'
+															: 'text-text-muted'
+												}`}
+											>
+												{pnl24h !== 0 ? formatCurrency(pnl24h, 2) : '-'}
 											</td>
 										</tr>
 									);

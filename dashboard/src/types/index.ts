@@ -144,3 +144,33 @@ export interface PositionHistoryResponse {
 		hasPrev: boolean;
 	};
 }
+
+export type OrderStatus =
+	| 'NEW'
+	| 'CANCELLED'
+	| 'PARTIAL_FILLED'
+	| 'FILLED'
+	| 'REJECTED'
+	| 'INCOMPLETE'
+	| 'COMPLETED';
+
+export interface Order {
+	orderId: string;
+	symbol: string;
+	side: 'BUY' | 'SELL';
+	orderType: 'MARKET' | 'LIMIT';
+	status: OrderStatus;
+	size: number;
+	price: number | null;
+	filledSize: number;
+	avgPrice: number | null;
+	realizedPnl: number;
+	totalFee: number;
+	createdAt: number;
+	updatedAt: number;
+}
+
+export interface OrdersResponse {
+	orders: Order[];
+	total: number;
+}

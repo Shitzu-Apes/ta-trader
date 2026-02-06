@@ -7,7 +7,8 @@ import type {
 	HistoricalData,
 	SignalsData,
 	LogsData,
-	PositionHistoryResponse
+	PositionHistoryResponse,
+	OrdersResponse
 } from '@/types';
 
 const API_BASE = '';
@@ -54,5 +55,14 @@ export const api = {
 	getPositionHistory: (page = 1, limit = 10) =>
 		fetchJson<PositionHistoryResponse>(
 			`${API_BASE}/api/position-history?page=${page}&limit=${limit}`
-		)
+		),
+	getOrders: (page = 1, limit = 25, symbol?: string) => {
+		const params = new URLSearchParams();
+		params.append('page', String(page));
+		params.append('limit', String(limit));
+		if (symbol) {
+			params.append('symbol', symbol);
+		}
+		return fetchJson<OrdersResponse>(`${API_BASE}/api/orders?${params.toString()}`);
+	}
 };

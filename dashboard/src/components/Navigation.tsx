@@ -1,10 +1,20 @@
-import { LayoutDashboard, TrendingUp, BarChart3, Activity, FileText, Menu, X } from 'lucide-react';
+import {
+	LayoutDashboard,
+	TrendingUp,
+	ShoppingCart,
+	BarChart3,
+	Activity,
+	FileText,
+	Menu,
+	X
+} from 'lucide-react';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 
 const navItems = [
 	{ path: '/', label: 'Overview', icon: LayoutDashboard },
 	{ path: '/positions', label: 'Positions', icon: TrendingUp },
+	{ path: '/orders', label: 'Orders', icon: ShoppingCart },
 	{ path: '/market', label: 'Market', icon: BarChart3 },
 	{ path: '/signals', label: 'Signals', icon: Activity },
 	{ path: '/logs', label: 'Logs', icon: FileText }
