@@ -476,42 +476,76 @@ app.post('/reset', async (c) => {
 app.get('/logs', async (c) => {
 	try {
 		const limit = Number(c.req.query('limit') ?? '100');
-		const prefix = c.req.query('prefix') ?? 'logs:';
+		const offset = Number(c.req.query('offset') ?? '0');
+		const level = c.req.query('level');
+		const symbol = c.req.query('symbol');
+		const operation = c.req.query('operation');
+		const from = c.req.query('from');
+		const to = c.req.query('to');
 
 		if (isNaN(limit) || limit < 1 || limit > 1000) {
 			return c.json({ error: 'Invalid limit. Must be between 1 and 1000' }, 400);
 		}
 
-		// List all keys with the logs prefix
-		const keys = await c.env.LOGS.list({ prefix });
+		// Build query with filters
+		let whereClause = 'WHERE 1=1';
+		const params: (string | number)[] = [];
 
-		// Get the most recent logs (sorted by key, which includes timestamp)
-		const sortedKeys = keys.keys.sort((a, b) => b.name.localeCompare(a.name)).slice(0, limit);
+		if (level) {
+			whereClause += ' AND level = ?';
+			params.push(level);
+		}
+		if (symbol) {
+			whereClause += ' AND symbol = ?';
+			params.push(symbol);
+		}
+		if (operation) {
+			whereClause += ' AND operation = ?';
+			params.push(operation);
+		}
+		if (from) {
+			whereClause += ' AND timestamp >= ?';
+			params.push(parseInt(from));
+		}
+		if (to) {
+			whereClause += ' AND timestamp <= ?';
+			params.push(parseInt(to));
+		}
 
-		// Fetch all log entries
-		const logs = await Promise.all(
-			sortedKeys.map(async (key) => {
-				const value = await c.env.LOGS.get(key.name);
-				if (!value) return null;
-				try {
-					return {
-						key: key.name,
-						data: JSON.parse(value),
-						expiration: key.expiration
-					};
-				} catch {
-					return {
-						key: key.name,
-						data: value,
-						expiration: key.expiration
-					};
-				}
-			})
-		);
+		// Get total count
+		const countResult = await c.env.DB.prepare(`SELECT COUNT(*) as total FROM logs ${whereClause}`)
+			.bind(...params)
+			.first<{ total: number }>();
+
+		// Get logs with pagination
+		params.push(limit, offset);
+		const logs = await c.env.DB.prepare(
+			`SELECT * FROM logs ${whereClause} ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+		)
+			.bind(...params)
+			.all();
+
+		// Format logs for response
+		const formattedLogs =
+			logs.results?.map((row: Record<string, unknown>) => ({
+				id: row.id,
+				timestamp: new Date(row.timestamp as number).toISOString(),
+				level: row.level,
+				message: row.message,
+				requestId: row.request_id,
+				symbol: row.symbol,
+				operation: row.operation,
+				data: row.data ? JSON.parse(row.data as string) : null,
+				error: row.error ? JSON.parse(row.error as string) : null,
+				createdAt: row.created_at
+			})) ?? [];
 
 		return c.json({
-			count: logs.length,
-			logs: logs.filter(Boolean)
+			count: formattedLogs.length,
+			total: countResult?.total ?? 0,
+			offset,
+			limit,
+			logs: formattedLogs
 		});
 	} catch (error) {
 		console.error('Error fetching logs:', error);
@@ -520,26 +554,34 @@ app.get('/logs', async (c) => {
 });
 
 // Get specific log entry
-app.get('/logs/:key', async (c) => {
+app.get('/logs/:id', async (c) => {
 	try {
-		const key = c.req.param('key');
-		const value = await c.env.LOGS.get(key);
+		const id = Number(c.req.param('id'));
 
-		if (!value) {
+		if (isNaN(id)) {
+			return c.json({ error: 'Invalid log ID' }, 400);
+		}
+
+		const row = await c.env.DB.prepare('SELECT * FROM logs WHERE id = ?')
+			.bind(id)
+			.first<Record<string, unknown>>();
+
+		if (!row) {
 			return c.json({ error: 'Log not found' }, 404);
 		}
 
-		try {
-			return c.json({
-				key,
-				data: JSON.parse(value)
-			});
-		} catch {
-			return c.json({
-				key,
-				data: value
-			});
-		}
+		return c.json({
+			id: row.id,
+			timestamp: new Date(row.timestamp as number).toISOString(),
+			level: row.level,
+			message: row.message,
+			requestId: row.request_id,
+			symbol: row.symbol,
+			operation: row.operation,
+			data: row.data ? JSON.parse(row.data as string) : null,
+			error: row.error ? JSON.parse(row.error as string) : null,
+			createdAt: row.created_at
+		});
 	} catch (error) {
 		console.error('Error fetching log:', error);
 		return c.json({ error: 'Internal server error' }, 500);

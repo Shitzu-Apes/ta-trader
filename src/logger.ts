@@ -104,16 +104,67 @@ class Logger {
 			}
 		});
 
-		// Store logs in KV
+		// Store logs in D1
 		if (this.env) {
 			try {
-				const key = `logs:${this.requestId}:${Date.now()}`;
-				await this.env.LOGS.put(key, JSON.stringify(logsToFlush), {
-					expirationTtl: 86400 // 24 hours
-				});
+				await this.writeLogsToD1(logsToFlush);
+				// Rotate logs: delete entries older than 24 hours
+				await this.rotateLogs();
 			} catch (e) {
-				console.error('Failed to store logs in KV:', e);
+				console.error('[LOGGER] Failed to store logs in D1:', e);
+				console.error('[LOGGER] Error details:', JSON.stringify(e));
 			}
+		} else {
+			console.error('[LOGGER] No env available, cannot write to D1');
+		}
+	}
+
+	private async writeLogsToD1(logsToFlush: LogEntry[]): Promise<void> {
+		if (!this.env || logsToFlush.length === 0) return;
+
+		// Build batch INSERT statement
+		const placeholders = logsToFlush.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+		const values: (string | number | null)[] = [];
+
+		for (const entry of logsToFlush) {
+			values.push(
+				Date.parse(entry.timestamp), // timestamp as integer
+				entry.context?.requestId || this.requestId,
+				entry.level,
+				entry.message,
+				entry.context?.symbol || null,
+				entry.context?.operation || null,
+				entry.data ? JSON.stringify(entry.data) : null,
+				entry.error ? JSON.stringify(entry.error) : null
+			);
+		}
+
+		const sql = `
+			INSERT INTO logs (timestamp, request_id, level, message, symbol, operation, data, error)
+			VALUES ${placeholders}
+		`;
+
+		await this.env.DB.prepare(sql)
+			.bind(...values)
+			.run();
+		console.log(`[LOGGER] Successfully wrote ${logsToFlush.length} logs to D1`);
+	}
+
+	private async rotateLogs(): Promise<void> {
+		if (!this.env) return;
+
+		const cutoffTime = Date.now() - 24 * 60 * 60 * 1000; // 24 hours ago
+
+		try {
+			const result = await this.env.DB.prepare('DELETE FROM logs WHERE timestamp < ?')
+				.bind(cutoffTime)
+				.run();
+
+			if (result.meta?.changes && result.meta.changes > 0) {
+				console.log(`[LOGGER] Rotated ${result.meta.changes} old log entries`);
+			}
+		} catch (e) {
+			console.error('[LOGGER] Failed to rotate logs:', e);
 		}
 	}
 

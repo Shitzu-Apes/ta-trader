@@ -13,7 +13,7 @@ export function Overview() {
 
 	const activePositions = portfolio?.positions?.filter((p) => p.size > 0) || [];
 	const totalPnl = activePositions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
-	const errorCount = logs?.logs?.filter((l) => l.data.level === 'ERROR').length || 0;
+	const errorCount = logs?.logs?.filter((l) => l.level === 'ERROR').length || 0;
 
 	if (isLoading) {
 		return (

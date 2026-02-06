@@ -5,35 +5,34 @@ import { useLogs } from '@/hooks/useApi';
 import type { LogEntry } from '@/types';
 
 export function Logs() {
-	const [filterLevel, setFilterLevel] = useState<LogEntry['data']['level'] | 'ALL'>('ALL');
+	const [filterLevel, setFilterLevel] = useState<LogEntry['level'] | 'ALL'>('ALL');
 	const [searchQuery, setSearchQuery] = useState('');
 
 	const { data: logsData, isLoading } = useLogs(100);
 	const logs = logsData?.logs || [];
 
 	const filteredLogs = logs.filter((log) => {
-		const matchesLevel = filterLevel === 'ALL' || log.data.level === filterLevel;
+		const matchesLevel = filterLevel === 'ALL' || log.level === filterLevel;
 		const matchesSearch =
 			searchQuery === '' ||
-			log.data.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			log.data.context?.operation?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			log.data.context?.symbol?.toLowerCase().includes(searchQuery.toLowerCase());
+			log.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
+			log.operation?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+			log.symbol?.toLowerCase().includes(searchQuery.toLowerCase());
 
 		return matchesLevel && matchesSearch;
 	});
 
-	const levelFilters: { value: LogEntry['data']['level'] | 'ALL'; label: string; color: string }[] =
-		[
-			{ value: 'ALL', label: 'All', color: 'bg-text-muted' },
-			{ value: 'ERROR', label: 'Errors', color: 'bg-danger' },
-			{ value: 'WARN', label: 'Warnings', color: 'bg-warning' },
-			{ value: 'INFO', label: 'Info', color: 'bg-info' },
-			{ value: 'DEBUG', label: 'Debug', color: 'bg-text-muted' }
-		];
+	const levelFilters: { value: LogEntry['level'] | 'ALL'; label: string; color: string }[] = [
+		{ value: 'ALL', label: 'All', color: 'bg-text-muted' },
+		{ value: 'ERROR', label: 'Errors', color: 'bg-danger' },
+		{ value: 'WARN', label: 'Warnings', color: 'bg-warning' },
+		{ value: 'INFO', label: 'Info', color: 'bg-info' },
+		{ value: 'DEBUG', label: 'Debug', color: 'bg-text-muted' }
+	];
 
-	const getLevelCount = (level: LogEntry['data']['level'] | 'ALL') => {
+	const getLevelCount = (level: LogEntry['level'] | 'ALL') => {
 		if (level === 'ALL') return logs.length;
-		return logs.filter((l) => l.data.level === level).length;
+		return logs.filter((l) => l.level === level).length;
 	};
 
 	return (
@@ -96,7 +95,7 @@ export function Logs() {
 
 					<div className="divide-y divide-border">
 						{filteredLogs.map((log) => (
-							<LogEntryComponent key={log.key} log={log} />
+							<LogEntryComponent key={log.id} log={log} />
 						))}
 					</div>
 				</div>

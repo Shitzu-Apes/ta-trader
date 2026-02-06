@@ -89,26 +89,27 @@ export interface SignalsData {
 }
 
 export interface LogEntry {
-	key: string;
-	data: {
-		timestamp: string;
-		level: 'ERROR' | 'WARN' | 'INFO' | 'DEBUG';
+	id: number;
+	timestamp: string;
+	level: 'ERROR' | 'WARN' | 'INFO' | 'DEBUG';
+	message: string;
+	requestId: string;
+	symbol?: string;
+	operation?: string;
+	data?: Record<string, unknown>;
+	error?: {
 		message: string;
-		context?: {
-			operation?: string;
-			symbol?: string;
-			[key: string]: unknown;
-		};
-		error?: {
-			message: string;
-			[key: string]: unknown;
-		};
+		stack?: string;
+		code?: string;
 	};
-	expiration?: number;
+	createdAt: string;
 }
 
 export interface LogsData {
 	count: number;
+	total: number;
+	offset: number;
+	limit: number;
 	logs: LogEntry[];
 }
 

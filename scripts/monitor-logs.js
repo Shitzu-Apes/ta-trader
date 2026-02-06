@@ -42,31 +42,30 @@ function analyzeLogs(logs) {
 		bySymbol: {}
 	};
 
-	for (const log of logs.logs || []) {
-		for (const entry of log.data || []) {
-			stats.total++;
+	// New D1 format: logs.logs is an array of log entries directly
+	for (const entry of logs.logs || []) {
+		stats.total++;
 
-			// Count by level
-			if (entry.level === 'ERROR') {
-				stats.errors++;
-				errors.push(entry);
-			} else if (entry.level === 'WARN') {
-				stats.warnings++;
-				warnings.push(entry);
-			} else if (entry.level === 'INFO') {
-				stats.info++;
-			} else if (entry.level === 'DEBUG') {
-				stats.debug++;
-			}
-
-			// Count by operation
-			const op = entry.context?.operation || 'unknown';
-			stats.byOperation[op] = (stats.byOperation[op] || 0) + 1;
-
-			// Count by symbol
-			const symbol = entry.context?.symbol || 'none';
-			stats.bySymbol[symbol] = (stats.bySymbol[symbol] || 0) + 1;
+		// Count by level
+		if (entry.level === 'ERROR') {
+			stats.errors++;
+			errors.push(entry);
+		} else if (entry.level === 'WARN') {
+			stats.warnings++;
+			warnings.push(entry);
+		} else if (entry.level === 'INFO') {
+			stats.info++;
+		} else if (entry.level === 'DEBUG') {
+			stats.debug++;
 		}
+
+		// Count by operation
+		const op = entry.operation || 'unknown';
+		stats.byOperation[op] = (stats.byOperation[op] || 0) + 1;
+
+		// Count by symbol
+		const symbol = entry.symbol || 'none';
+		stats.bySymbol[symbol] = (stats.bySymbol[symbol] || 0) + 1;
 	}
 
 	return { errors, warnings, stats };
@@ -123,12 +122,12 @@ function printReport({ errors, warnings, stats }) {
 			if (errorGroups[key].examples.length < 3) {
 				errorGroups[key].examples.push({
 					timestamp: error.timestamp,
-					context: error.context,
+					operation: error.operation,
 					error: error.error
 				});
 			}
-			if (error.context?.symbol) {
-				errorGroups[key].symbols.add(error.context.symbol);
+			if (error.symbol) {
+				errorGroups[key].symbols.add(error.symbol);
 			}
 		}
 
@@ -142,8 +141,8 @@ function printReport({ errors, warnings, stats }) {
 			data.examples.forEach((ex, i) => {
 				console.log(`   Example ${i + 1}:`);
 				console.log(`     Time: ${ex.timestamp}`);
-				if (ex.context?.operation) {
-					console.log(`     Operation: ${ex.context.operation}`);
+				if (ex.operation) {
+					console.log(`     Operation: ${ex.operation}`);
 				}
 				if (ex.error?.message) {
 					console.log(`     Error: ${ex.error.message}`);
