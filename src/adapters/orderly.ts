@@ -486,17 +486,13 @@ export class OrderlyAdapter implements TradingAdapter {
 
 		const price = await this.getPrice(symbol);
 
-		// size is in USDC, convert to base token quantity
-		const rawQuantity = size / price;
-
-		// Get step size and round quantity properly
+		// size is already in base asset units when closing, just round to step size
 		const stepSize = await getStepSize(this.env, symbol);
-		const quantity = roundQuantityToStepSize(rawQuantity, stepSize);
+		const quantity = roundQuantityToStepSize(size, stepSize);
 
 		logger.info('Closing long position', ctx, {
 			size,
 			price,
-			rawQuantity,
 			quantity,
 			stepSize
 		});
@@ -552,17 +548,13 @@ export class OrderlyAdapter implements TradingAdapter {
 
 		const price = await this.getPrice(symbol);
 
-		// size is in USDC, convert to base token quantity
-		const rawQuantity = size / price;
-
-		// Get step size and round quantity properly
+		// size is already in base asset units when closing, just round to step size
 		const stepSize = await getStepSize(this.env, symbol);
-		const quantity = roundQuantityToStepSize(rawQuantity, stepSize);
+		const quantity = roundQuantityToStepSize(size, stepSize);
 
 		logger.info('Closing short position', ctx, {
 			size,
 			price,
-			rawQuantity,
 			quantity,
 			stepSize
 		});
