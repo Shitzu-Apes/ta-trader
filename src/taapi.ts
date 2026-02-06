@@ -226,6 +226,25 @@ export async function fetchTaapiIndicators(orderlySymbol: PerpSymbol, env: EnvBi
 	await storeIndicators(env, orderlySymbol, timestamp, indicators);
 }
 
+// Check if we have enough historical data for a symbol before opening positions
+async function hasEnoughHistoricalData(
+	db: D1Database,
+	symbol: string,
+	minTimestamps: number
+): Promise<boolean> {
+	const query = `
+		SELECT COUNT(DISTINCT timestamp) as count
+		FROM datapoints
+		WHERE symbol = ?
+		AND indicator IN ('candle', 'vwap', 'atr', 'bbands', 'rsi', 'obv')
+	`;
+
+	const stmt = db.prepare(query);
+	const result = await stmt.bind(symbol).first<{ count: number }>();
+
+	return (result?.count || 0) >= minTimestamps;
+}
+
 export async function fetchHistoricalData(db: D1Database, symbol: string, env?: EnvBindings) {
 	const logger = env ? getLogger(env) : null;
 	const ctx = createContext(symbol, 'fetch_historical_data');
@@ -375,6 +394,16 @@ export async function analyzeMarketData(env: EnvBindings, symbol: string) {
 	try {
 		const { currentPrice, vwap, bbandsUpper, bbandsLower, rsi, prices, obvs } =
 			await fetchHistoricalData(env.DB, symbol, env);
+
+		// Check if we have enough historical data before opening positions
+		const hasEnoughData = await hasEnoughHistoricalData(
+			env.DB,
+			symbol,
+			TRADING_CONFIG.OBV_WINDOW_SIZE
+		);
+		if (!hasEnoughData) {
+			return;
+		}
 
 		// Create the adapter instance
 		const adapter = getAdapter(env);
