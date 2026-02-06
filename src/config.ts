@@ -75,8 +75,8 @@ export const POSITION_SIZING_CONFIG = {
 	// Minimum order size in USD
 	MIN_ORDER_SIZE_USD: 50,
 
-	// Position adjustment threshold (20% of max leverage position size)
-	POSITION_ADJUSTMENT_THRESHOLD_PERCENT: 0.2,
+	// Position adjustment threshold
+	POSITION_ADJUSTMENT_THRESHOLD_PERCENT: 0.35,
 
 	// Score multipliers
 	PROFIT_SCORE_MULTIPLIER: 0.75,
