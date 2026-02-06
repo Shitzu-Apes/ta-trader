@@ -409,7 +409,8 @@ export async function analyzeForecast(
 
 		// Same direction - check if we need to adjust position size
 		// Convert position size (base tokens) to notional value (USDC) for comparison
-		const currentNotionalValue = position.size * actualPrice;
+		// Use absolute value since position.size is negative for shorts
+		const currentNotionalValue = Math.abs(position.size * actualPrice);
 		const sizeDiff = targetSize - currentNotionalValue;
 		const adjustmentThreshold =
 			currentNotionalValue * POSITION_SIZING_CONFIG.POSITION_ADJUSTMENT_THRESHOLD_PERCENT;
