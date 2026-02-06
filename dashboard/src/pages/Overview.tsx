@@ -97,6 +97,9 @@ export function Overview() {
 									<th className="text-left py-2 px-4 text-sm font-medium text-text-muted">
 										Mark Price
 									</th>
+									<th className="text-left py-2 px-4 text-sm font-medium text-text-muted">
+										Notional
+									</th>
 									<th className="text-left py-2 px-4 text-sm font-medium text-text-muted">PnL</th>
 								</tr>
 							</thead>
@@ -128,6 +131,9 @@ export function Overview() {
 											</td>
 											<td className="py-3 px-4 text-text">
 												{formatCurrency(position.markPrice, 2)}
+											</td>
+											<td className="py-3 px-4 text-text">
+												{formatCurrency(position.size * position.markPrice, 2)}
 											</td>
 											<td
 												className={`py-3 px-4 font-medium ${isProfit ? 'text-success' : 'text-danger'}`}
