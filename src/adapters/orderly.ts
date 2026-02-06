@@ -232,7 +232,6 @@ export class OrderlyAdapter implements TradingAdapter {
 			return position;
 		} catch (_error) {
 			// Position not found - this is normal, don't log as error
-			logger.debug('No position found', ctx);
 			return null;
 		}
 	}

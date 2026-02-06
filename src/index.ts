@@ -9,10 +9,15 @@ import { poweredBy } from 'hono/powered-by';
 import type { HTTPResponseError } from 'hono/types';
 
 import { getAdapter } from './adapters';
-import { getTradingConfig, HTTP_CONFIG, PerpSymbol } from './config';
+import { getTradingConfig, HTTP_CONFIG, PerpSymbol, TAAPI_CONFIG } from './config';
 import datapoints from './datapoints';
 import { getLogger, resetLogger, createContext, withTiming } from './logger';
-import { updateIndicators, analyzeMarketData, fetchTaapiIndicatorsRaw, Indicators } from './taapi';
+import {
+	updateIndicators,
+	analyzeMarketData,
+	fetchTaapiIndicatorsBatch,
+	Indicators
+} from './taapi';
 import { checkAndClosePositions, checkSignalReversal } from './trading';
 import { EnvBindings } from './types';
 
@@ -171,52 +176,69 @@ async function monitorPositions(env: EnvBindings) {
 		}
 
 		logger.info(
-			`Found ${symbolsWithPositions.length} open positions, fetching fresh indicators for signal reversal check`,
+			`Found ${symbolsWithPositions.length} open positions, fetching fresh indicators for signal reversal check (batch size: ${TAAPI_CONFIG.BATCH_SIZE})`,
 			ctx,
 			{
-				symbols: symbolsWithPositions
+				symbols: symbolsWithPositions,
+				batchSize: TAAPI_CONFIG.BATCH_SIZE
 			}
 		);
 
-		// Fetch fresh TA indicators for symbols with open positions (in-memory only)
-		const indicatorResults = await Promise.allSettled(
-			symbolsWithPositions.map(async (symbol) => {
-				try {
-					const { indicators } = await fetchTaapiIndicatorsRaw(symbol, env);
+		// Fetch fresh TA indicators for symbols with open positions using batched API call
+		const indicatorResults: Array<{
+			symbol: PerpSymbol;
+			currentPrice: number;
+			vwap: number;
+			bbandsUpper: number;
+			bbandsLower: number;
+			rsi: number;
+			obv: number;
+		} | null> = [];
 
-					// Parse indicators into the format needed for analysis
-					const indicatorMap = new Map(indicators.map((item) => [item.id, item.result]));
+		try {
+			const batchResults = await fetchTaapiIndicatorsBatch(symbolsWithPositions, env);
 
-					const candle = indicatorMap.get('candle') as Indicators['candle'] | undefined;
-					const vwap = indicatorMap.get('vwap') as Indicators['vwap'] | undefined;
-					const bbands = indicatorMap.get('bbands') as Indicators['bbands'] | undefined;
-					const rsi = indicatorMap.get('rsi') as Indicators['rsi'] | undefined;
-					const obv = indicatorMap.get('obv') as Indicators['obv'] | undefined;
-
-					return {
-						symbol,
-						currentPrice: candle?.close ?? 0,
-						vwap: vwap?.value ?? 0,
-						bbandsUpper: bbands?.valueUpperBand ?? 0,
-						bbandsLower: bbands?.valueLowerBand ?? 0,
-						rsi: rsi?.value ?? 0,
-						obv: obv?.value ?? 0
-					};
-				} catch (error) {
-					logger.error(`Failed to fetch indicators for ${symbol}`, error as Error, {
-						...ctx,
-						symbol
-					});
-					return null;
+			// Process each symbol's indicators from the batch response
+			for (const symbol of symbolsWithPositions) {
+				const result = batchResults.get(symbol);
+				if (!result) {
+					logger.error(`No indicators returned for ${symbol}`, undefined, ctx);
+					indicatorResults.push(null);
+					continue;
 				}
-			})
-		);
+
+				// Parse indicators into the format needed for analysis
+				const indicatorMap = new Map(result.indicators.map((item) => [item.id, item.result]));
+
+				const candle = indicatorMap.get('candle') as Indicators['candle'] | undefined;
+				const vwap = indicatorMap.get('vwap') as Indicators['vwap'] | undefined;
+				const bbands = indicatorMap.get('bbands') as Indicators['bbands'] | undefined;
+				const rsi = indicatorMap.get('rsi') as Indicators['rsi'] | undefined;
+				const obv = indicatorMap.get('obv') as Indicators['obv'] | undefined;
+
+				indicatorResults.push({
+					symbol,
+					currentPrice: candle?.close ?? 0,
+					vwap: vwap?.value ?? 0,
+					bbandsUpper: bbands?.valueUpperBand ?? 0,
+					bbandsLower: bbands?.valueLowerBand ?? 0,
+					rsi: rsi?.value ?? 0,
+					obv: obv?.value ?? 0
+				});
+			}
+		} catch (error) {
+			logger.error('Failed to fetch indicators batch for position monitoring', error as Error, ctx);
+			// Mark all symbols as failed
+			for (let i = 0; i < symbolsWithPositions.length; i++) {
+				indicatorResults.push(null);
+			}
+		}
 
 		// Check signal reversal for each symbol that successfully fetched indicators
 		await Promise.all(
 			indicatorResults.map(async (result) => {
-				if (result.status === 'fulfilled' && result.value) {
-					const { symbol, currentPrice, vwap, bbandsUpper, bbandsLower, rsi, obv } = result.value;
+				if (result) {
+					const { symbol, currentPrice, vwap, bbandsUpper, bbandsLower, rsi, obv } = result;
 
 					// For signal reversal, we need historical data (prices and OBVs)
 					// Since we only have current values from fresh fetch, we'll use a simplified approach

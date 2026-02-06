@@ -26,7 +26,7 @@ class Logger {
 	private env?: EnvBindings;
 	private requestId: string;
 	private logs: LogEntry[] = [];
-	private readonly maxBatchSize = 50;
+	private readonly maxBatchSize = 20;
 	private readonly flushIntervalMs = 5000;
 	private flushTimer?: number;
 
@@ -122,32 +122,32 @@ class Logger {
 	private async writeLogsToD1(logsToFlush: LogEntry[]): Promise<void> {
 		if (!this.env || logsToFlush.length === 0) return;
 
-		// Build batch INSERT statement
-		const placeholders = logsToFlush.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
-		const values: (string | number | null)[] = [];
+		console.log(`[LOGGER] Writing ${logsToFlush.length} logs to D1`);
+		let insertedCount = 0;
 
+		// Use individual INSERT statements to avoid SQL variable limits
 		for (const entry of logsToFlush) {
-			values.push(
-				Date.parse(entry.timestamp), // timestamp as integer
-				entry.context?.requestId || this.requestId,
-				entry.level,
-				entry.message,
-				entry.context?.symbol || null,
-				entry.context?.operation || null,
-				entry.data ? JSON.stringify(entry.data) : null,
-				entry.error ? JSON.stringify(entry.error) : null
-			);
+			const sql = `
+				INSERT INTO logs (timestamp, request_id, level, message, symbol, operation, data, error)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			`;
+
+			await this.env.DB.prepare(sql)
+				.bind(
+					Date.parse(entry.timestamp),
+					entry.context?.requestId || this.requestId,
+					entry.level,
+					entry.message,
+					entry.context?.symbol || null,
+					entry.context?.operation || null,
+					entry.data ? JSON.stringify(entry.data) : null,
+					entry.error ? JSON.stringify(entry.error) : null
+				)
+				.run();
+			insertedCount++;
 		}
 
-		const sql = `
-			INSERT INTO logs (timestamp, request_id, level, message, symbol, operation, data, error)
-			VALUES ${placeholders}
-		`;
-
-		await this.env.DB.prepare(sql)
-			.bind(...values)
-			.run();
-		console.log(`[LOGGER] Successfully wrote ${logsToFlush.length} logs to D1`);
+		console.log(`[LOGGER] Successfully wrote ${insertedCount} logs to D1`);
 	}
 
 	private async rotateLogs(): Promise<void> {

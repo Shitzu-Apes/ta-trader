@@ -73,7 +73,6 @@ async function storeIndicators(
 	const ctx = createContext(symbol, 'store_indicators');
 
 	const storePromises = indicators.map(async (item) => {
-		logger.debug(`Storing indicator: ${item.id}`, ctx, { value: item.result });
 		await storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
 	});
 
@@ -85,27 +84,78 @@ async function storeIndicators(
 	});
 }
 
-// Fetch indicators from TAAPI without storing (returns raw data)
-export async function fetchTaapiIndicatorsRaw(
-	orderlySymbol: PerpSymbol,
+// Helper function to create TAAPI construct for a symbol
+function createTaapiConstruct(taapiSymbol: string) {
+	return {
+		exchange: 'binance',
+		symbol: taapiSymbol,
+		interval: '5m',
+		indicators: [
+			// Note: No custom 'id' fields - let TAAPI generate auto-prefixed IDs
+			// like "binance_BTC/USDT_5m_candle_0" which we can filter by symbol
+			{ indicator: 'candle' },
+			{ indicator: 'vwap' },
+			{ indicator: 'atr' },
+			{ indicator: 'bbands' },
+			{ indicator: 'rsi' },
+			{ indicator: 'obv' }
+		]
+	};
+}
+
+// Internal function to fetch indicators for a single symbol from TAAPI response
+function parseSingleSymbolIndicators(
+	bulkData: BulkResponse['data'],
+	taapiSymbol: string
+): BulkResponse['data'] {
+	// Filter indicators that belong to this symbol
+	// Response IDs are formatted like: "binance_BTC/USDT_5m_candle_0"
+	const prefix = `binance_${taapiSymbol}_5m_`;
+
+	return bulkData
+		.filter((item) => item.id.startsWith(prefix))
+		.map((item) => ({
+			...item,
+			// Strip the prefix to get clean indicator IDs
+			id: item.id.replace(prefix, '').replace(/_\d+$/, '')
+		}));
+}
+
+// Fetch indicators from TAAPI for multiple symbols (batched API call)
+export async function fetchTaapiIndicatorsBatch(
+	orderlySymbols: PerpSymbol[],
 	env: EnvBindings
-): Promise<{ indicators: BulkResponse['data']; timestamp: number }> {
+): Promise<Map<PerpSymbol, { indicators: BulkResponse['data']; timestamp: number }>> {
 	const logger = getLogger(env);
-	const ctx = createContext(orderlySymbol, 'fetch_indicators_raw');
+	const ctx = createContext(undefined, 'fetch_indicators_batch');
 	const now = getCurrentTimeframe();
 	const timestamp = now.valueOf();
 
-	// Convert Orderly symbol to TAAPI format for the API call
-	const taapiSymbol = ORDERLY_TO_TAAPI_MAP[orderlySymbol];
-	if (!taapiSymbol) {
-		logger.error('No TAAPI symbol mapping found', undefined, ctx);
-		throw new Error(`Unknown symbol: ${orderlySymbol}`);
+	// Convert Orderly symbols to TAAPI format
+	const symbolMap = new Map<PerpSymbol, string>();
+	const constructs = [];
+
+	for (const orderlySymbol of orderlySymbols) {
+		const taapiSymbol = ORDERLY_TO_TAAPI_MAP[orderlySymbol];
+		if (!taapiSymbol) {
+			logger.error('No TAAPI symbol mapping found', undefined, { ...ctx, symbol: orderlySymbol });
+			continue;
+		}
+		symbolMap.set(orderlySymbol, taapiSymbol);
+		constructs.push(createTaapiConstruct(taapiSymbol));
 	}
 
-	logger.info('Fetching indicators from TAAPI', ctx, { timestamp, taapiSymbol });
+	if (constructs.length === 0) {
+		throw new Error('No valid symbols to fetch');
+	}
+
+	logger.info(`Fetching indicators from TAAPI for ${constructs.length} symbols`, ctx, {
+		symbols: orderlySymbols,
+		batchSize: constructs.length
+	});
 
 	try {
-		// Fetch indicators from TAAPI
+		// Fetch indicators from TAAPI with multiple constructs
 		const response = await fetch('https://api.taapi.io/bulk', {
 			method: 'POST',
 			headers: {
@@ -113,19 +163,7 @@ export async function fetchTaapiIndicatorsRaw(
 			},
 			body: JSON.stringify({
 				secret: env.TAAPI_SECRET,
-				construct: {
-					exchange: 'binance',
-					symbol: taapiSymbol,
-					interval: '5m',
-					indicators: [
-						{ id: 'candle', indicator: 'candle' },
-						{ id: 'vwap', indicator: 'vwap' },
-						{ id: 'atr', indicator: 'atr' },
-						{ id: 'bbands', indicator: 'bbands' },
-						{ id: 'rsi', indicator: 'rsi' },
-						{ id: 'obv', indicator: 'obv' }
-					]
-				}
+				construct: constructs
 			})
 		});
 
@@ -136,9 +174,46 @@ export async function fetchTaapiIndicatorsRaw(
 
 		const { data: bulkData } = (await response.json()) as BulkResponse;
 
-		logger.info(`Received ${bulkData.length} indicators from TAAPI`, ctx);
+		logger.info(`Received ${bulkData.length} indicators from TAAPI`, ctx, {
+			totalIndicators: bulkData.length,
+			symbolsCount: constructs.length
+		});
 
-		return { indicators: bulkData, timestamp };
+		// Parse response and group by symbol
+		const results = new Map<PerpSymbol, { indicators: BulkResponse['data']; timestamp: number }>();
+
+		for (const [orderlySymbol, taapiSymbol] of symbolMap) {
+			const symbolIndicators = parseSingleSymbolIndicators(bulkData, taapiSymbol);
+			results.set(orderlySymbol, { indicators: symbolIndicators, timestamp });
+		}
+
+		return results;
+	} catch (error) {
+		logger.error('Failed to fetch indicators batch', error as Error, ctx);
+		throw error;
+	}
+}
+
+// Fetch indicators from TAAPI without storing (returns raw data)
+// Now uses batching internally for single symbol calls
+export async function fetchTaapiIndicatorsRaw(
+	orderlySymbol: PerpSymbol,
+	env: EnvBindings
+): Promise<{ indicators: BulkResponse['data']; timestamp: number }> {
+	const logger = getLogger(env);
+	const ctx = createContext(orderlySymbol, 'fetch_indicators_raw');
+
+	logger.info('Fetching indicators from TAAPI (single symbol)', ctx, { symbol: orderlySymbol });
+
+	try {
+		const results = await fetchTaapiIndicatorsBatch([orderlySymbol], env);
+		const result = results.get(orderlySymbol);
+
+		if (!result) {
+			throw new Error(`No indicators returned for symbol: ${orderlySymbol}`);
+		}
+
+		return result;
 	} catch (error) {
 		logger.error('Failed to fetch indicators', error as Error, ctx);
 		throw error;
@@ -327,42 +402,89 @@ export async function analyzeMarketData(env: EnvBindings, symbol: string) {
 	}
 }
 
-// Update indicators for all symbols
+// Update indicators for all symbols using batching
 export async function updateIndicators(env: EnvBindings): Promise<void> {
 	const logger = getLogger(env);
 	const ctx = createContext(undefined, 'update_all_indicators');
 
 	logger.info(
-		`Starting indicator update for ${TRADING_CONFIG.SUPPORTED_SYMBOLS.length} symbols`,
+		`Starting indicator update for ${TRADING_CONFIG.SUPPORTED_SYMBOLS.length} symbols with batch size ${TAAPI_CONFIG.BATCH_SIZE}`,
 		ctx,
-		{ symbols: TRADING_CONFIG.SUPPORTED_SYMBOLS }
+		{ symbols: TRADING_CONFIG.SUPPORTED_SYMBOLS, batchSize: TAAPI_CONFIG.BATCH_SIZE }
 	);
 
-	const results = await Promise.allSettled(
-		TRADING_CONFIG.SUPPORTED_SYMBOLS.map(async (symbol) => {
-			try {
-				await fetchTaapiIndicators(symbol, env);
-				return { symbol, success: true };
-			} catch (error) {
-				logger.error(`Failed to fetch indicators for ${symbol}`, error as Error, {
-					...ctx,
-					symbol
-				});
-				return { symbol, success: false, error: (error as Error).message };
+	// Split symbols into batches based on TAAPI_CONFIG.BATCH_SIZE
+	const batches: PerpSymbol[][] = [];
+	for (let i = 0; i < TRADING_CONFIG.SUPPORTED_SYMBOLS.length; i += TAAPI_CONFIG.BATCH_SIZE) {
+		batches.push(TRADING_CONFIG.SUPPORTED_SYMBOLS.slice(i, i + TAAPI_CONFIG.BATCH_SIZE));
+	}
+
+	logger.info(`Split into ${batches.length} batches`, ctx, {
+		batchCount: batches.length,
+		batchSizes: batches.map((b) => b.length)
+	});
+
+	const allResults: { symbol: PerpSymbol; success: boolean; error?: string }[] = [];
+
+	// Process each batch sequentially (to avoid overwhelming TAAPI)
+	for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+		const batch = batches[batchIndex];
+		const batchCtx = createContext(undefined, `batch_${batchIndex + 1}/${batches.length}`);
+
+		logger.info(`Processing batch ${batchIndex + 1}/${batches.length}`, batchCtx, {
+			symbols: batch
+		});
+
+		try {
+			// Fetch indicators for entire batch in a single API call
+			const batchResults = await fetchTaapiIndicatorsBatch(batch, env);
+
+			// Store indicators for each symbol
+			for (const [orderlySymbol, { indicators, timestamp }] of batchResults) {
+				try {
+					await storeIndicators(env, orderlySymbol, timestamp, indicators);
+					allResults.push({ symbol: orderlySymbol, success: true });
+					logger.info(`Successfully stored indicators for ${orderlySymbol}`, batchCtx);
+				} catch (storeError) {
+					logger.error(
+						`Failed to store indicators for ${orderlySymbol}`,
+						storeError as Error,
+						batchCtx
+					);
+					allResults.push({
+						symbol: orderlySymbol,
+						success: false,
+						error: (storeError as Error).message
+					});
+				}
 			}
-		})
-	);
+		} catch (fetchError) {
+			logger.error(`Batch ${batchIndex + 1} failed`, fetchError as Error, batchCtx);
+			// Mark all symbols in this batch as failed
+			for (const symbol of batch) {
+				allResults.push({
+					symbol,
+					success: false,
+					error: (fetchError as Error).message
+				});
+			}
+		}
 
-	const successful = results.filter((r) => r.status === 'fulfilled' && r.value.success).length;
-	const failed = results.length - successful;
+		// Small delay between batches to be nice to TAAPI
+		if (batchIndex < batches.length - 1) {
+			await new Promise((resolve) => setTimeout(resolve, 500));
+		}
+	}
+
+	const successful = allResults.filter((r) => r.success).length;
+	const failed = allResults.length - successful;
 
 	logger.info('Indicator update completed', ctx, {
-		total: results.length,
+		total: allResults.length,
 		successful,
 		failed,
-		details: results.map((r) =>
-			r.status === 'fulfilled' ? r.value : { symbol: 'unknown', success: false, error: r.reason }
-		)
+		batches: batches.length,
+		details: allResults
 	});
 
 	if (failed > 0) {

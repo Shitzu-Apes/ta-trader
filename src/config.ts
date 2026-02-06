@@ -141,7 +141,10 @@ export const TAAPI_TO_ORDERLY_MAP: Record<string, PerpSymbol> = {
 
 // Taapi API configuration
 export const TAAPI_CONFIG = {
-	HISTORY_LIMIT: 24 // 2 hours of 5-min candles
+	HISTORY_LIMIT: 24, // 2 hours of 5-min candles
+	// Number of symbols to batch per API call (Pro = 3, Expert = 10 constructs)
+	// Adjust based on your TAAPI subscription plan
+	BATCH_SIZE: 3
 } as const;
 
 // HTTP request configuration

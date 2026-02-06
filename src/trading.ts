@@ -574,7 +574,6 @@ export async function checkAndClosePositions(
 		const currentPosition = await adapter.getPosition(symbol);
 
 		if (!currentPosition) {
-			logger.debug('No active position to check', ctx);
 			return;
 		}
 
@@ -659,7 +658,6 @@ export async function checkSignalReversal(
 		const currentPosition = await adapter.getPosition(symbol);
 
 		if (!currentPosition) {
-			logger.debug('No active position to check for reversal', ctx);
 			return;
 		}
 
