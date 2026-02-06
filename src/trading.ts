@@ -1061,14 +1061,15 @@ async function adjustPositionSize(
 				await adapter.openShortPosition(symbol, size, options);
 			}
 		} else {
-			// Partial close
+			// Partial close - convert USD notional to base asset quantity
+			const baseAssetQuantity = size / price;
 			if (direction === 'LONG') {
-				await adapter.closeLongPosition(symbol, size, options);
+				await adapter.closeLongPosition(symbol, baseAssetQuantity, options);
 			} else {
 				if (!adapter.closeShortPosition) {
 					throw new Error('Adapter does not support short positions');
 				}
-				await adapter.closeShortPosition(symbol, size, options);
+				await adapter.closeShortPosition(symbol, baseAssetQuantity, options);
 			}
 		}
 
@@ -1076,6 +1077,7 @@ async function adjustPositionSize(
 			action,
 			direction,
 			size,
+			baseAssetQuantity: action === 'DECREASE' ? size / price : undefined,
 			newTargetSize: targetSize
 		});
 
