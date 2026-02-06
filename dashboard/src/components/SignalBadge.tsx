@@ -1,5 +1,6 @@
 import dayjs from 'dayjs';
 
+import { formatCurrency, formatNumber, formatScore } from '@/lib/format';
 import type { Signal } from '@/types';
 
 interface SignalBadgeProps {
@@ -46,10 +47,10 @@ export function SignalBadge({ signal }: SignalBadgeProps) {
 					{signal.type === 'ENTRY' && (
 						<div className="mt-3 flex items-center gap-4 text-xs">
 							<span className="text-text-muted">
-								Price: <span className="text-text">${signal.price.toFixed(2)}</span>
+								Price: <span className="text-text">{formatCurrency(signal.price, 2)}</span>
 							</span>
 							<span className="text-text-muted">
-								TA Score: <span className="text-text">{signal.taScore.toFixed(2)}</span>
+								TA Score: <span className="text-text">{formatScore(signal.taScore, 2)}</span>
 							</span>
 						</div>
 					)}
@@ -59,7 +60,7 @@ export function SignalBadge({ signal }: SignalBadgeProps) {
 							<span className="text-text-muted">
 								PnL:{' '}
 								<span className={signal.unrealizedPnl >= 0 ? 'text-success' : 'text-danger'}>
-									{signal.unrealizedPnl >= 0 ? '+' : ''}${signal.unrealizedPnl.toFixed(2)}
+									{formatCurrency(signal.unrealizedPnl, 2)}
 								</span>
 							</span>
 						</div>
@@ -67,7 +68,7 @@ export function SignalBadge({ signal }: SignalBadgeProps) {
 				</div>
 
 				<div className="ml-4 text-right">
-					<div className="text-2xl font-bold text-text">{signal.taScore.toFixed(1)}</div>
+					<div className="text-2xl font-bold text-text">{formatNumber(signal.taScore, 1)}</div>
 					<div className="text-xs text-text-muted">TA Score</div>
 				</div>
 			</div>

@@ -2,6 +2,7 @@ import { ArrowLeft } from 'lucide-react';
 import { useParams, Link } from 'react-router-dom';
 
 import { useLatestData, useLatestSignal } from '@/hooks/useApi';
+import { formatScore } from '@/lib/format';
 
 export function MarketDetail() {
 	const { symbol } = useParams<{ symbol: string }>();
@@ -87,7 +88,7 @@ export function MarketDetail() {
 							<p className="text-sm text-text-muted mb-2">TA Score</p>
 							<div className="flex items-center gap-4">
 								<div className="text-4xl font-bold text-text">
-									{signal?.taScore?.toFixed(2) || '-'}
+									{signal?.taScore !== undefined ? formatNumber(signal.taScore, 2) : '-'}
 								</div>
 								{signal?.taScore !== undefined && (
 									<span
@@ -224,8 +225,7 @@ export function MarketDetail() {
 									<p
 										className={`text-lg font-bold ${signal.indicators.vwap >= 0 ? 'text-success' : 'text-danger'}`}
 									>
-										{signal.indicators.vwap >= 0 ? '+' : ''}
-										{signal.indicators.vwap.toFixed(2)}
+										{formatScore(signal.indicators.vwap, 2)}
 									</p>
 								</div>
 								<div className="text-center p-3 bg-surface-hover rounded-lg">
@@ -233,8 +233,7 @@ export function MarketDetail() {
 									<p
 										className={`text-lg font-bold ${signal.indicators.bbands >= 0 ? 'text-success' : 'text-danger'}`}
 									>
-										{signal.indicators.bbands >= 0 ? '+' : ''}
-										{signal.indicators.bbands.toFixed(2)}
+										{formatScore(signal.indicators.bbands, 2)}
 									</p>
 								</div>
 								<div className="text-center p-3 bg-surface-hover rounded-lg">
@@ -242,8 +241,7 @@ export function MarketDetail() {
 									<p
 										className={`text-lg font-bold ${signal.indicators.rsi >= 0 ? 'text-success' : 'text-danger'}`}
 									>
-										{signal.indicators.rsi >= 0 ? '+' : ''}
-										{signal.indicators.rsi.toFixed(2)}
+										{formatScore(signal.indicators.rsi, 2)}
 									</p>
 								</div>
 								<div className="text-center p-3 bg-surface-hover rounded-lg">
@@ -251,8 +249,7 @@ export function MarketDetail() {
 									<p
 										className={`text-lg font-bold ${signal.indicators.obv >= 0 ? 'text-success' : 'text-danger'}`}
 									>
-										{signal.indicators.obv >= 0 ? '+' : ''}
-										{signal.indicators.obv.toFixed(2)}
+										{formatScore(signal.indicators.obv, 2)}
 									</p>
 								</div>
 								<div className="text-center p-3 bg-primary/10 rounded-lg">
@@ -260,8 +257,7 @@ export function MarketDetail() {
 									<p
 										className={`text-lg font-bold ${signal.indicators.total >= 0 ? 'text-success' : 'text-danger'}`}
 									>
-										{signal.indicators.total >= 0 ? '+' : ''}
-										{signal.indicators.total.toFixed(2)}
+										{formatScore(signal.indicators.total, 2)}
 									</p>
 								</div>
 							</div>

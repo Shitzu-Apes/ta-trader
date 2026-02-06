@@ -2,6 +2,7 @@ import { ArrowUpRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { useLatestData, useLatestSignal } from '@/hooks/useApi';
+import { formatCurrency, formatNumber } from '@/lib/format';
 
 interface SymbolCardProps {
 	symbol: string;
@@ -48,9 +49,7 @@ export function SymbolCard({ symbol }: SymbolCardProps) {
 					<div>
 						<p className="text-xs text-text-muted uppercase tracking-wide">Price</p>
 						<p className="text-2xl font-bold text-text">
-							{price !== undefined
-								? `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-								: '-'}
+							{price !== undefined ? formatCurrency(price, 2) : '-'}
 						</p>
 					</div>
 
@@ -60,7 +59,7 @@ export function SymbolCard({ symbol }: SymbolCardProps) {
 							<p
 								className={`text-xl font-bold ${taScore !== undefined ? getTaScoreColor(taScore) : 'text-text-muted'}`}
 							>
-								{taScore !== undefined ? taScore.toFixed(2) : '-'}
+								{taScore !== undefined ? formatNumber(taScore, 2) : '-'}
 							</p>
 							{taScore !== undefined && (
 								<span className="text-xs text-text-muted">{getTaScoreLabel(taScore)}</span>

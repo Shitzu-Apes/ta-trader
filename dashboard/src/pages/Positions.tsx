@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import { PositionRow } from '@/components/PositionRow';
 import { usePositions, usePositionHistory } from '@/hooks/useApi';
+import { formatCurrency } from '@/lib/format';
 
 export function Positions() {
 	const { data: positionsData, isLoading: positionsLoading } = usePositions();
@@ -35,7 +36,7 @@ export function Positions() {
 						{activePositions.length} active positions
 						{totalPnl !== 0 && (
 							<span className={`ml-2 ${totalPnl >= 0 ? 'text-success' : 'text-danger'}`}>
-								Total PnL: {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
+								Total PnL: {formatCurrency(totalPnl, 2)}
 							</span>
 						)}
 					</p>
@@ -122,7 +123,7 @@ export function Positions() {
 													position.realizedPnl >= 0 ? 'text-success' : 'text-danger'
 												}`}
 											>
-												{position.realizedPnl >= 0 ? '+' : ''}${position.realizedPnl.toFixed(2)}
+												{formatCurrency(position.realizedPnl, 2)}
 											</td>
 										</tr>
 									))}
@@ -206,18 +207,21 @@ export function Positions() {
 												{position.side}
 											</span>
 										</td>
-										<td className="py-3 px-4 text-text">{(position.size ?? 0).toFixed(4)}</td>
 										<td className="py-3 px-4 text-text">
-											${(position.entryPrice ?? 0).toFixed(2)}
+											{formatCurrency(Math.abs(position.size ?? 0), 4)}
 										</td>
-										<td className="py-3 px-4 text-text">${(position.exitPrice ?? 0).toFixed(2)}</td>
+										<td className="py-3 px-4 text-text">
+											{formatCurrency(Math.abs(position.entryPrice ?? 0), 2)}
+										</td>
+										<td className="py-3 px-4 text-text">
+											{formatCurrency(Math.abs(position.exitPrice ?? 0), 2)}
+										</td>
 										<td
 											className={`py-3 px-4 font-medium ${
 												(position.realizedPnl ?? 0) >= 0 ? 'text-success' : 'text-danger'
 											}`}
 										>
-											{(position.realizedPnl ?? 0) >= 0 ? '+' : ''}$
-											{(position.realizedPnl ?? 0).toFixed(2)}
+											{formatCurrency(position.realizedPnl, 2)}
 										</td>
 										<td className="py-3 px-4 text-text-muted text-sm">
 											{position.closedAt ? dayjs(position.closedAt).format('lll') : '-'}

@@ -2,6 +2,7 @@ import { Wallet, TrendingUp, AlertCircle, Activity } from 'lucide-react';
 
 import { StatCard } from '@/components/StatCard';
 import { usePortfolio, useConfig, useLogs } from '@/hooks/useApi';
+import { formatCurrency, formatPercent, formatNumber } from '@/lib/format';
 
 export function Overview() {
 	const { data: portfolio, isLoading: portfolioLoading } = usePortfolio();
@@ -48,7 +49,7 @@ export function Overview() {
 			<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
 				<StatCard
 					title="Balance"
-					value={`$${portfolio?.balance?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`}
+					value={formatCurrency(portfolio?.balance, 2)}
 					subtitle="USDC"
 					icon={<Wallet className="h-5 w-5 text-primary" />}
 				/>
@@ -62,9 +63,9 @@ export function Overview() {
 
 				<StatCard
 					title="Total Unrealized PnL"
-					value={`${totalPnl >= 0 ? '+' : ''}$${totalPnl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+					value={formatCurrency(totalPnl, 2)}
 					trend={totalPnl > 0 ? 'up' : totalPnl < 0 ? 'down' : 'neutral'}
-					trendValue={`${((totalPnl / (portfolio?.balance || 1)) * 100).toFixed(2)}%`}
+					trendValue={formatPercent((totalPnl / (portfolio?.balance || 1)) * 100)}
 					icon={<Activity className="h-5 w-5 text-primary" />}
 				/>
 
@@ -121,19 +122,18 @@ export function Overview() {
 													{position.isLong ? 'LONG' : 'SHORT'}
 												</span>
 											</td>
-											<td className="py-3 px-4 text-text">{position.size.toFixed(4)}</td>
+											<td className="py-3 px-4 text-text">{formatNumber(position.size, 4)}</td>
 											<td className="py-3 px-4 text-text-muted">
-												${position.entryPrice.toFixed(2)}
+												{formatCurrency(position.entryPrice, 2)}
 											</td>
-											<td className="py-3 px-4 text-text">${position.markPrice.toFixed(2)}</td>
+											<td className="py-3 px-4 text-text">
+												{formatCurrency(position.markPrice, 2)}
+											</td>
 											<td
 												className={`py-3 px-4 font-medium ${isProfit ? 'text-success' : 'text-danger'}`}
 											>
-												{isProfit ? '+' : ''}${position.unrealizedPnl.toFixed(2)}
-												<span className="text-xs ml-1">
-													({pnlPercent >= 0 ? '+' : ''}
-													{pnlPercent.toFixed(2)}%)
-												</span>
+												{formatCurrency(position.unrealizedPnl, 2)}
+												<span className="text-xs ml-1">({formatPercent(pnlPercent)})</span>
 											</td>
 										</tr>
 									);
