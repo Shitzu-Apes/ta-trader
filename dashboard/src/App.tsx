@@ -7,8 +7,6 @@ import { Markets } from '@/pages/Markets';
 import { Orders } from '@/pages/Orders';
 import { Overview } from '@/pages/Overview';
 import { Positions } from '@/pages/Positions';
-import { Signals } from '@/pages/Signals';
-
 function App() {
 	return (
 		<Layout>
@@ -18,7 +16,6 @@ function App() {
 				<Route path="/orders" element={<Orders />} />
 				<Route path="/markets" element={<Markets />} />
 				<Route path="/markets/:symbol" element={<MarketDetail />} />
-				<Route path="/signals" element={<Signals />} />
 				<Route path="/logs" element={<Logs />} />
 			</Routes>
 		</Layout>

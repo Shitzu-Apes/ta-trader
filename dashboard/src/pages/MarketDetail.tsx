@@ -1,8 +1,31 @@
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 
-import { useLatestData, useLatestSignal } from '@/hooks/useApi';
+import { SignalBadge } from '@/components/SignalBadge';
+import { useLatestData, useLatestSignal, useSignals } from '@/hooks/useApi';
 import { formatScore } from '@/lib/format';
+import type { Signal } from '@/types';
+
+const SIGNAL_TYPES: Signal['type'][] = [
+	'ENTRY',
+	'EXIT',
+	'STOP_LOSS',
+	'TAKE_PROFIT',
+	'ADJUSTMENT',
+	'HOLD',
+	'NO_ACTION'
+];
+
+const typeConfig: Record<Signal['type'], { label: string }> = {
+	ENTRY: { label: 'Entry' },
+	EXIT: { label: 'Exit' },
+	STOP_LOSS: { label: 'Stop Loss' },
+	TAKE_PROFIT: { label: 'Take Profit' },
+	ADJUSTMENT: { label: 'Adjustment' },
+	HOLD: { label: 'Hold' },
+	NO_ACTION: { label: 'No Action' }
+};
 
 export function MarketDetail() {
 	const { symbol } = useParams<{ symbol: string }>();
@@ -16,6 +39,78 @@ export function MarketDetail() {
 	const signal = latestSignal?.signal;
 
 	const displaySymbol = decodedSymbol.replace('PERP_', '').replace('_USDC', '');
+
+	// Signal history state
+	const [selectedTypes, setSelectedTypes] = useState<Signal['type'][]>([]);
+	const [cursorHistory, setCursorHistory] = useState<string[]>([]);
+	const [currentCursor, setCurrentCursor] = useState<string | undefined>(undefined);
+
+	// Initialize with all types selected
+	useEffect(() => {
+		if (selectedTypes.length === 0) {
+			setSelectedTypes(SIGNAL_TYPES);
+		}
+	}, [selectedTypes.length]);
+
+	const { data: signalsData, isLoading: signalsLoading } = useSignals(
+		decodedSymbol,
+		50,
+		currentCursor
+	);
+	const signals = signalsData?.signals || [];
+	const totalCount = signalsData?.totalCount || 0;
+	const hasMore = signalsData?.pagination?.hasMore || false;
+
+	// Handle next page
+	const handleNext = () => {
+		if (signalsData?.pagination?.nextCursor) {
+			if (currentCursor) {
+				setCursorHistory((prev) => [...prev, currentCursor]);
+			} else {
+				setCursorHistory(['']);
+			}
+			setCurrentCursor(signalsData.pagination.nextCursor);
+		}
+	};
+
+	// Handle previous page
+	const handlePrev = () => {
+		if (cursorHistory.length > 0) {
+			const newHistory = [...cursorHistory];
+			const prevCursor = newHistory.pop();
+			setCursorHistory(newHistory);
+			setCurrentCursor(prevCursor === '' ? undefined : prevCursor);
+		}
+	};
+
+	const hasPrev = cursorHistory.length > 0;
+
+	// Filter signals based on selected types
+	const filteredSignals = useMemo(() => {
+		if (selectedTypes.length === 0) return signals;
+		return signals.filter((signal) => selectedTypes.includes(signal.type));
+	}, [signals, selectedTypes]);
+
+	// Toggle type selection
+	const toggleType = (type: Signal['type']) => {
+		setSelectedTypes((prev) => {
+			const isSelected = prev.includes(type);
+			if (isSelected) {
+				if (prev.length === 1) return prev;
+				return prev.filter((t) => t !== type);
+			}
+			return [...prev, type];
+		});
+		setCurrentCursor(undefined);
+		setCursorHistory([]);
+	};
+
+	// Select all types
+	const selectAllTypes = () => {
+		setSelectedTypes(SIGNAL_TYPES);
+		setCurrentCursor(undefined);
+		setCursorHistory([]);
+	};
 
 	const getTaScoreInterpretation = (score: number) => {
 		if (score >= 2) return { label: 'STRONG BUY', color: 'bg-success text-white' };
@@ -263,6 +358,121 @@ export function MarketDetail() {
 							</div>
 						</div>
 					)}
+
+					{/* Signal History */}
+					<div className="space-y-4">
+						<div className="flex items-center justify-between">
+							<h2 className="text-lg font-semibold text-text">Signal History</h2>
+							<p className="text-sm text-text-muted">{totalCount} total signals</p>
+						</div>
+
+						{/* Filter by Type */}
+						<div className="card">
+							<div className="flex items-center justify-between mb-4">
+								<h3 className="font-semibold text-text">Filter by Type</h3>
+								<button
+									onClick={selectAllTypes}
+									className="text-sm text-primary hover:text-primary-hover transition-colors"
+									disabled={selectedTypes.length === SIGNAL_TYPES.length}
+								>
+									Select All
+								</button>
+							</div>
+							<div className="flex flex-wrap gap-3">
+								{SIGNAL_TYPES.map((type) => {
+									const isSelected = selectedTypes.includes(type);
+									return (
+										<label
+											key={type}
+											className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all ${
+												isSelected
+													? 'bg-surface-hover ring-2 ring-primary'
+													: 'bg-surface opacity-50 hover:opacity-75'
+											}`}
+										>
+											<input
+												type="checkbox"
+												checked={isSelected}
+												onChange={() => toggleType(type)}
+												className="w-4 h-4 rounded border-border bg-surface text-primary focus:ring-primary focus:ring-offset-0"
+											/>
+											<span
+												className={`text-sm font-medium ${isSelected ? 'text-text' : 'text-text-muted'}`}
+											>
+												{typeConfig[type].label}
+											</span>
+										</label>
+									);
+								})}
+							</div>
+						</div>
+
+						{signalsLoading ? (
+							<div className="flex items-center justify-center h-32">
+								<div className="text-text-muted">Loading signals...</div>
+							</div>
+						) : filteredSignals.length === 0 ? (
+							<div className="card text-center py-12">
+								<p className="text-text-muted">No signals found</p>
+								<p className="text-sm text-text-muted mt-2">
+									Signals will appear here when trading conditions are met
+								</p>
+							</div>
+						) : (
+							<div className="space-y-4">
+								<div className="flex items-center justify-between">
+									<p className="text-sm text-text-muted">
+										Showing {filteredSignals.length} of {totalCount} signals
+									</p>
+									{/* Pagination Controls */}
+									<div className="flex items-center gap-2">
+										<button
+											onClick={handlePrev}
+											disabled={!hasPrev || signalsLoading}
+											className="p-1 rounded hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed text-text-muted"
+										>
+											<ChevronLeft className="w-5 h-5" />
+										</button>
+										<span className="text-sm text-text-muted px-2">
+											Page {cursorHistory.length + 1}
+										</span>
+										<button
+											onClick={handleNext}
+											disabled={!hasMore || signalsLoading}
+											className="p-1 rounded hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed text-text-muted"
+										>
+											<ChevronRight className="w-5 h-5" />
+										</button>
+									</div>
+								</div>
+
+								{filteredSignals.map((signalItem, index) => (
+									<SignalBadge key={`${signalItem.timestamp}-${index}`} signal={signalItem} />
+								))}
+
+								{/* Bottom Pagination Controls */}
+								<div className="flex items-center justify-center gap-2 pt-4">
+									<button
+										onClick={handlePrev}
+										disabled={!hasPrev || signalsLoading}
+										className="px-4 py-2 rounded-lg bg-surface text-text-muted hover:text-text hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+									>
+										← Previous
+									</button>
+									<span className="text-sm text-text-muted px-4">
+										Page {cursorHistory.length + 1}
+									</span>
+									<button
+										onClick={handleNext}
+										disabled={!hasMore || signalsLoading}
+										className="px-4 py-2 rounded-lg bg-surface text-text-muted hover:text-text hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+									>
+										Next →
+									</button>
+								</div>
+							</div>
+						)}
+					</div>
 				</>
 			)}
 		</div>
