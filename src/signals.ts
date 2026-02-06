@@ -3,7 +3,7 @@ import { EnvBindings } from './types';
 export type TradingSignal = {
 	symbol: string;
 	timestamp: number;
-	type: 'ENTRY' | 'EXIT' | 'HOLD' | 'NO_ACTION' | 'ADJUSTMENT';
+	type: 'ENTRY' | 'EXIT' | 'HOLD' | 'NO_ACTION' | 'ADJUSTMENT' | 'STOP_LOSS' | 'TAKE_PROFIT';
 	direction?: 'LONG' | 'SHORT';
 	action?: 'OPEN' | 'CLOSE' | 'INCREASE' | 'DECREASE';
 	reason?:
@@ -63,7 +63,7 @@ export async function getSignals(
 		from?: number;
 		to?: number;
 		limit?: number;
-		type?: 'ENTRY' | 'EXIT' | 'NO_ACTION';
+		type?: 'ENTRY' | 'EXIT' | 'NO_ACTION' | 'STOP_LOSS' | 'TAKE_PROFIT' | 'ADJUSTMENT' | 'HOLD';
 	}
 ): Promise<TradingSignal[]> {
 	const prefix = `${SIGNALS_PREFIX}${symbol}:`;

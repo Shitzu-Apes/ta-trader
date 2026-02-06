@@ -606,7 +606,7 @@ export async function checkAndClosePositions(
 				priceDiff: (priceDiff * 100).toFixed(4) + '%',
 				threshold: (tradingConfig.STOP_LOSS_THRESHOLD * 100).toFixed(2) + '%'
 			});
-			await closePosition(adapter, symbol, position);
+			await closePositionWithExitType(adapter, env, symbol, position, actualPrice, 'STOP_LOSS');
 			return;
 		}
 
@@ -618,7 +618,7 @@ export async function checkAndClosePositions(
 				priceDiff: (priceDiff * 100).toFixed(4) + '%',
 				threshold: (tradingConfig.TAKE_PROFIT_THRESHOLD * 100).toFixed(2) + '%'
 			});
-			await closePosition(adapter, symbol, position);
+			await closePositionWithExitType(adapter, env, symbol, position, actualPrice, 'TAKE_PROFIT');
 			return;
 		}
 
@@ -819,6 +819,91 @@ async function closePositionWithSignal(
 			direction: position.isLong ? 'LONG' : 'SHORT',
 			size: position.size,
 			realizedPnl: position.realizedPnl
+		});
+	} catch (error) {
+		logger.error('Failed to close position', error as Error, ctx, {
+			direction: position.isLong ? 'LONG' : 'SHORT',
+			size: position.size
+		});
+		throw error;
+	}
+}
+
+/**
+ * Close a position due to stop-loss or take-profit trigger
+ * Stores explicit STOP_LOSS or TAKE_PROFIT signal types
+ */
+async function closePositionWithExitType(
+	adapter: TradingAdapter,
+	env: EnvBindings,
+	symbol: string,
+	position: Position,
+	price: number,
+	exitType: 'STOP_LOSS' | 'TAKE_PROFIT'
+): Promise<void> {
+	const logger = getLogger();
+	const ctx = createContext(symbol, 'close_position');
+
+	logger.info(`Closing position due to ${exitType}`, ctx, {
+		direction: position.isLong ? 'LONG' : 'SHORT',
+		size: position.size,
+		entryPrice: position.entryPrice,
+		currentPrice: price,
+		unrealizedPnl: position.unrealizedPnl,
+		realizedPnl: position.realizedPnl
+	});
+
+	const tradingConfig = getTradingConfig(env);
+
+	// Store exit signal with explicit type
+	const exitSignal: TradingSignal = {
+		symbol,
+		timestamp: Date.now(),
+		type: exitType,
+		action: 'CLOSE',
+		direction: position.isLong ? 'LONG' : 'SHORT',
+		reason: exitType,
+		taScore: 0,
+		threshold:
+			exitType === 'STOP_LOSS'
+				? tradingConfig.STOP_LOSS_THRESHOLD
+				: tradingConfig.TAKE_PROFIT_THRESHOLD,
+		price,
+		positionSize: position.size,
+		entryPrice: position.entryPrice,
+		unrealizedPnl: position.unrealizedPnl,
+		realizedPnl: position.realizedPnl
+	};
+	await storeSignal(env, exitSignal);
+
+	const exchangeType = adapter.getExchangeType();
+	const options =
+		exchangeType === ExchangeType.AMM
+			? ({
+					type: ExchangeType.AMM,
+					maxPriceImpact: 0.05
+				} as const)
+			: ({
+					type: ExchangeType.ORDERBOOK,
+					orderType: 'market' as const
+				} as const);
+
+	try {
+		// Close position using adapter
+		if (position.isLong) {
+			await adapter.closeLongPosition(symbol, position.size, options);
+		} else {
+			if (!adapter.closeShortPosition) {
+				throw new Error('Adapter does not support short positions');
+			}
+			await adapter.closeShortPosition(symbol, position.size, options);
+		}
+
+		logger.info('Position closed successfully', ctx, {
+			direction: position.isLong ? 'LONG' : 'SHORT',
+			size: position.size,
+			realizedPnl: position.realizedPnl,
+			exitType
 		});
 	} catch (error) {
 		logger.error('Failed to close position', error as Error, ctx, {

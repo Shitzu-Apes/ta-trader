@@ -558,7 +558,15 @@ app.get('/signals/:symbol', async (c) => {
 		const limit = Number(c.req.query('limit') ?? '50');
 		const from = c.req.query('from');
 		const to = c.req.query('to');
-		const type = c.req.query('type') as 'ENTRY' | 'EXIT' | 'NO_ACTION' | undefined;
+		const type = c.req.query('type') as
+			| 'ENTRY'
+			| 'EXIT'
+			| 'STOP_LOSS'
+			| 'TAKE_PROFIT'
+			| 'NO_ACTION'
+			| 'ADJUSTMENT'
+			| 'HOLD'
+			| undefined;
 
 		if (isNaN(limit) || limit < 1 || limit > 1000) {
 			return c.json({ error: 'Invalid limit. Must be between 1 and 1000' }, 400);
