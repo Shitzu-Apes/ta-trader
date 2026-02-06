@@ -399,11 +399,14 @@ export class OrderlyAdapter implements TradingAdapter {
 				orderId: response.data.order_id.toString()
 			};
 		} catch (error) {
-			logger.error('Failed to open long position', error as Error, ctx, {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			const enhancedError = new Error(`${errorMessage} | Order: ${JSON.stringify(orderBody)}`);
+			logger.error('Failed to open long position', enhancedError, ctx, {
 				size,
-				quantity
+				quantity,
+				orderBody
 			});
-			throw error;
+			throw enhancedError;
 		}
 	}
 
@@ -464,11 +467,14 @@ export class OrderlyAdapter implements TradingAdapter {
 				orderId: response.data.order_id.toString()
 			};
 		} catch (error) {
-			logger.error('Failed to open short position', error as Error, ctx, {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			const enhancedError = new Error(`${errorMessage} | Order: ${JSON.stringify(orderBody)}`);
+			logger.error('Failed to open short position', enhancedError, ctx, {
 				size,
-				quantity
+				quantity,
+				orderBody
 			});
-			throw error;
+			throw enhancedError;
 		}
 	}
 
@@ -526,11 +532,14 @@ export class OrderlyAdapter implements TradingAdapter {
 				orderId: response.data.order_id.toString()
 			};
 		} catch (error) {
-			logger.error('Failed to close long position', error as Error, ctx, {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			const enhancedError = new Error(`${errorMessage} | Order: ${JSON.stringify(orderBody)}`);
+			logger.error('Failed to close long position', enhancedError, ctx, {
 				size,
-				quantity
+				quantity,
+				orderBody
 			});
-			throw error;
+			throw enhancedError;
 		}
 	}
 
@@ -588,11 +597,14 @@ export class OrderlyAdapter implements TradingAdapter {
 				orderId: response.data.order_id.toString()
 			};
 		} catch (error) {
-			logger.error('Failed to close short position', error as Error, ctx, {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			const enhancedError = new Error(`${errorMessage} | Order: ${JSON.stringify(orderBody)}`);
+			logger.error('Failed to close short position', enhancedError, ctx, {
 				size,
-				quantity
+				quantity,
+				orderBody
 			});
-			throw error;
+			throw enhancedError;
 		}
 	}
 

@@ -1,6 +1,7 @@
 import { getPublicKeyAsync, signAsync } from '@noble/ed25519';
 import bs58 from 'bs58';
 
+import { getLogger, createContext } from '../logger';
 import { EnvBindings } from '../types';
 
 /**
@@ -182,13 +183,36 @@ export async function makeOrderlyRequest<T>(
 		throw new Error(`Orderly API returned non-JSON: ${responseText}`);
 	}
 
+	const logger = getLogger(env);
+	const ctx = createContext(
+		typeof body === 'object' && body !== null && 'symbol' in body
+			? (body as { symbol: string }).symbol
+			: 'unknown',
+		`orderly_${method.toLowerCase()}_${path.replace(/\//g, '_')}`
+	);
+
 	if (!response.ok) {
-		throw new Error(`Orderly API error: ${response.status} ${JSON.stringify(responseData)}`);
+		const errorMessage = `Orderly API error: ${response.status} ${JSON.stringify(responseData)}`;
+		logger.error('Orderly request failed', new Error(errorMessage), ctx, {
+			method,
+			path,
+			requestBody: body,
+			response: responseData,
+			status: response.status
+		});
+		throw new Error(errorMessage);
 	}
 
 	// Check if response has success=false
 	if (responseData.success === false) {
-		throw new Error(`Orderly API error: ${JSON.stringify(responseData)}`);
+		const errorMessage = `Orderly API error: ${JSON.stringify(responseData)}`;
+		logger.error('Orderly request returned success=false', new Error(errorMessage), ctx, {
+			method,
+			path,
+			requestBody: body,
+			response: responseData
+		});
+		throw new Error(errorMessage);
 	}
 
 	return responseData as T;
