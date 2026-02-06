@@ -57,15 +57,15 @@ export const MAX_ORDER_SIZE_USD: Record<PerpSymbol, number> = {
 
 // Max leverage per symbol (how much leverage to use for each symbol)
 export const MAX_LEVERAGE_PER_SYMBOL: Record<PerpSymbol, number> = {
-	[PERP_SYMBOLS.BTC]: 5,
-	[PERP_SYMBOLS.ETH]: 5,
-	[PERP_SYMBOLS.SOL]: 4,
-	[PERP_SYMBOLS.BNB]: 4,
-	[PERP_SYMBOLS.NEAR]: 3
+	[PERP_SYMBOLS.BTC]: 8,
+	[PERP_SYMBOLS.ETH]: 8,
+	[PERP_SYMBOLS.SOL]: 6,
+	[PERP_SYMBOLS.BNB]: 6,
+	[PERP_SYMBOLS.NEAR]: 5
 };
 
 // Max total account leverage across all positions
-export const MAX_ACCOUNT_LEVERAGE = 8;
+export const MAX_ACCOUNT_LEVERAGE = 12;
 
 // Position sizing configuration
 export const POSITION_SIZING_CONFIG = {
