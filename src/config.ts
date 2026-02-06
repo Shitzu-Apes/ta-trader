@@ -80,7 +80,7 @@ export const POSITION_SIZING_CONFIG = {
 
 	// Score multipliers
 	PROFIT_SCORE_MULTIPLIER: 0.75,
-	TIME_DECAY_MULTIPLIER: 0.02 // per minute
+	TIME_DECAY_MULTIPLIER: 0.01 // per minute
 } as const;
 
 // Environment-specific configurations

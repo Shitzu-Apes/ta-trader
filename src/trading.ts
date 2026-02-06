@@ -353,10 +353,10 @@ export async function analyzeForecast(
 		// Calculate exit score with profit and time decay multipliers
 		const profitScore = calculateProfitScore(position, actualPrice);
 		const timeDecayScore = calculateTimeDecayScore(position.openedAt);
+		// Apply time decay directionally: subtract for longs, add for shorts
+		const timeDecayApplied = position.isLong ? timeDecayScore : -timeDecayScore;
 		const exitScore =
-			taScore +
-			profitScore * POSITION_SIZING_CONFIG.PROFIT_SCORE_MULTIPLIER +
-			timeDecayScore * POSITION_SIZING_CONFIG.TIME_DECAY_MULTIPLIER;
+			taScore + profitScore * POSITION_SIZING_CONFIG.PROFIT_SCORE_MULTIPLIER + timeDecayApplied;
 
 		logger.info('Exit score calculated', ctx, {
 			taScore,
@@ -699,8 +699,15 @@ export async function checkSignalReversal(
 		);
 		const taScore = taScoreResult.score;
 
+		// Apply time decay to encourage closing long-held positions
+		const timeDecayScore = calculateTimeDecayScore(position.openedAt);
+		// Apply time decay directionally: subtract for longs, add for shorts
+		const exitScore = position.isLong ? taScore + timeDecayScore : taScore - timeDecayScore;
+
 		logger.info('TA Score calculated for reversal check', ctx, {
 			taScore,
+			timeDecayScore,
+			exitScore,
 			isLong: position.isLong
 		});
 
@@ -709,14 +716,18 @@ export async function checkSignalReversal(
 			? TRADING_CONFIG.POSITION_THRESHOLDS.long
 			: TRADING_CONFIG.POSITION_THRESHOLDS.short;
 
-		// Check if signal reversed (score opposite to position direction)
-		const shouldClose = position.isLong ? taScore < thresholds.sell : taScore > thresholds.sell;
+		// Check if signal reversed or time decay triggered close
+		const shouldClose = position.isLong ? exitScore < thresholds.sell : exitScore > thresholds.sell;
 
 		if (shouldClose) {
-			logger.info('Signal reversal triggered', ctx, {
+			const reason = timeDecayScore < -0.1 ? 'TIME_DECAY' : 'SIGNAL_REVERSAL';
+			logger.info('Position close triggered', ctx, {
+				exitScore,
 				taScore,
+				timeDecayScore,
 				threshold: thresholds.sell,
-				isLong: position.isLong
+				isLong: position.isLong,
+				reason
 			});
 
 			// Store exit signal
@@ -726,7 +737,7 @@ export async function checkSignalReversal(
 				type: 'EXIT',
 				action: 'CLOSE',
 				direction: position.isLong ? 'LONG' : 'SHORT',
-				reason: 'SIGNAL_REVERSAL',
+				reason,
 				taScore,
 				threshold: thresholds.sell,
 				price: actualPrice,
@@ -734,7 +745,8 @@ export async function checkSignalReversal(
 				entryPrice: position.entryPrice,
 				unrealizedPnl: position.unrealizedPnl,
 				realizedPnl: position.realizedPnl,
-				indicators: taScoreResult.indicators
+				indicators: taScoreResult.indicators,
+				timeDecayScore
 			};
 			await storeSignal(env, exitSignal);
 
@@ -743,7 +755,9 @@ export async function checkSignalReversal(
 		}
 
 		logger.info('No signal reversal detected, holding position', ctx, {
+			exitScore,
 			taScore,
+			timeDecayScore,
 			threshold: thresholds.sell,
 			isLong: position.isLong
 		});
