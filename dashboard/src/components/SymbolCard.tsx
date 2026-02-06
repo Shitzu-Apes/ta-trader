@@ -35,7 +35,7 @@ export function SymbolCard({ symbol }: SymbolCardProps) {
 	return (
 		<div className="card group relative hover:border-primary/50 transition-colors">
 			<Link
-				to={`/market/${encodeURIComponent(symbol)}`}
+				to={`/markets/${encodeURIComponent(symbol)}`}
 				className="absolute top-3 right-3 p-2 text-text-muted hover:text-primary transition-colors"
 				aria-label={`View details for ${displaySymbol}`}
 			>

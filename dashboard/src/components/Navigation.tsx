@@ -15,7 +15,7 @@ const navItems = [
 	{ path: '/', label: 'Overview', icon: LayoutDashboard },
 	{ path: '/positions', label: 'Positions', icon: TrendingUp },
 	{ path: '/orders', label: 'Orders', icon: ShoppingCart },
-	{ path: '/market', label: 'Market', icon: BarChart3 },
+	{ path: '/markets', label: 'Markets', icon: BarChart3 },
 	{ path: '/signals', label: 'Signals', icon: Activity },
 	{ path: '/logs', label: 'Logs', icon: FileText }
 ];

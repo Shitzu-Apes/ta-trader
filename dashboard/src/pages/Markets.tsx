@@ -1,13 +1,13 @@
 import { SymbolCard } from '@/components/SymbolCard';
 import { useConfig } from '@/hooks/useApi';
 
-export function Market() {
+export function Markets() {
 	const { data: config, isLoading } = useConfig();
 
 	return (
 		<div className="space-y-6">
 			<div>
-				<h1 className="text-2xl font-bold text-text">Market</h1>
+				<h1 className="text-2xl font-bold text-text">Markets</h1>
 				<p className="text-text-muted mt-1">Select a trading pair to view detailed analysis</p>
 			</div>
 
