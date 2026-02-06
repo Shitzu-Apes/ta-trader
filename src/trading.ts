@@ -408,10 +408,11 @@ export async function analyzeForecast(
 		}
 
 		// Same direction - check if we need to adjust position size
-		const currentSize = position.size;
-		const sizeDiff = targetSize - currentSize;
+		// Convert position size (base tokens) to notional value (USDC) for comparison
+		const currentNotionalValue = position.size * actualPrice;
+		const sizeDiff = targetSize - currentNotionalValue;
 		const adjustmentThreshold =
-			currentSize * POSITION_SIZING_CONFIG.POSITION_ADJUSTMENT_THRESHOLD_PERCENT;
+			currentNotionalValue * POSITION_SIZING_CONFIG.POSITION_ADJUSTMENT_THRESHOLD_PERCENT;
 
 		if (
 			Math.abs(sizeDiff) > adjustmentThreshold &&
@@ -420,7 +421,7 @@ export async function analyzeForecast(
 			if (sizeDiff > 0) {
 				// Increase position
 				logger.info('Increasing position size', ctx, {
-					currentSize,
+					currentNotionalValue,
 					targetSize,
 					increaseBy: sizeDiff,
 					reason: 'STRENGTHENED_SIGNAL'
@@ -436,7 +437,7 @@ export async function analyzeForecast(
 					indicatorScores,
 					actualPrice,
 					targetSize,
-					currentSize,
+					currentNotionalValue,
 					intensity,
 					availableLeverage
 				);
@@ -444,7 +445,7 @@ export async function analyzeForecast(
 				// Decrease position (partial close)
 				const decreaseSize = Math.abs(sizeDiff);
 				logger.info('Decreasing position size', ctx, {
-					currentSize,
+					currentNotionalValue,
 					targetSize,
 					decreaseBy: decreaseSize,
 					reason: 'WEAKENED_SIGNAL'
@@ -460,7 +461,7 @@ export async function analyzeForecast(
 					indicatorScores,
 					actualPrice,
 					targetSize,
-					currentSize,
+					currentNotionalValue,
 					intensity,
 					availableLeverage
 				);
@@ -494,7 +495,7 @@ export async function analyzeForecast(
 			realizedPnl: position.realizedPnl,
 			indicators: indicatorScores,
 			targetSize,
-			currentSize: position.size,
+			currentSize: currentNotionalValue,
 			intensity,
 			availableLeverage
 		};
