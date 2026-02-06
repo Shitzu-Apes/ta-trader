@@ -51,6 +51,14 @@ export function Overview() {
 					title="Balance"
 					value={formatCurrency(portfolio?.balance, 2)}
 					subtitle="USDC"
+					trend={
+						(portfolio?.dailyPnl || 0) > 0
+							? 'up'
+							: (portfolio?.dailyPnl || 0) < 0
+								? 'down'
+								: 'neutral'
+					}
+					trendValue={`24h: ${formatCurrency(portfolio?.dailyPnl || 0, 2)}`}
 					icon={<Wallet className="h-5 w-5 text-primary" />}
 				/>
 

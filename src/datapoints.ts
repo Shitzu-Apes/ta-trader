@@ -287,9 +287,23 @@ app.get('/balance', async (c) => {
 		const adapter = getAdapter(c.env);
 		const balance = await adapter.getBalance();
 
+		// Calculate daily realized PnL (last 24 hours)
+		let dailyPnl = 0;
+		try {
+			const history = await adapter.getPositionHistory?.(undefined, 1000);
+			if (history?.history) {
+				const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+				const yesterdayTrades = history.history.filter((pos) => pos.closedAt >= oneDayAgo);
+				dailyPnl = yesterdayTrades.reduce((sum, pos) => sum + pos.realizedPnl, 0);
+			}
+		} catch (e) {
+			console.error('Error calculating daily PnL:', e);
+		}
+
 		return c.json({
 			balance,
-			currency: 'USDC'
+			currency: 'USDC',
+			dailyPnl
 		});
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
@@ -430,9 +444,23 @@ app.get('/portfolio', async (c) => {
 		// Get all positions
 		const positions = await adapter.getPositions();
 
+		// Calculate daily realized PnL (last 24 hours)
+		let dailyPnl = 0;
+		try {
+			const history = await adapter.getPositionHistory?.(undefined, 1000);
+			if (history?.history) {
+				const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+				const yesterdayTrades = history.history.filter((pos) => pos.closedAt >= oneDayAgo);
+				dailyPnl = yesterdayTrades.reduce((sum, pos) => sum + pos.realizedPnl, 0);
+			}
+		} catch (e) {
+			console.error('Error calculating daily PnL:', e);
+		}
+
 		return c.json({
 			balance,
-			positions
+			positions,
+			dailyPnl
 		});
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);

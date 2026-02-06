@@ -7,6 +7,7 @@ export interface Config {
 export interface Balance {
 	balance: number;
 	currency: string;
+	dailyPnl?: number;
 }
 
 export interface Position {
@@ -23,6 +24,7 @@ export interface Position {
 export interface Portfolio {
 	balance: number;
 	positions: Position[];
+	dailyPnl?: number;
 }
 
 export interface IndicatorData {
