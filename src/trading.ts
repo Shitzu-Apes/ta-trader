@@ -298,13 +298,17 @@ export async function analyzeForecast(
 			openedAt: new Date(position.openedAt).toISOString()
 		});
 
-		// Check stop loss
-		if (priceDiff <= tradingConfig.STOP_LOSS_THRESHOLD) {
+		// Check stop loss (inverted for short positions)
+		const stopLossHit = position.isLong
+			? priceDiff <= tradingConfig.STOP_LOSS_THRESHOLD
+			: priceDiff >= -tradingConfig.STOP_LOSS_THRESHOLD;
+		if (stopLossHit) {
 			logger.warn('Stop loss triggered', ctx, {
 				entryPrice: position.entryPrice,
 				currentPrice: actualPrice,
 				priceDiff: (priceDiff * 100).toFixed(4) + '%',
-				threshold: (tradingConfig.STOP_LOSS_THRESHOLD * 100).toFixed(2) + '%'
+				threshold: (tradingConfig.STOP_LOSS_THRESHOLD * 100).toFixed(2) + '%',
+				direction: position.isLong ? 'LONG' : 'SHORT'
 			});
 
 			await closePositionWithSignal(
@@ -320,13 +324,17 @@ export async function analyzeForecast(
 			return;
 		}
 
-		// Check take profit
-		if (priceDiff >= tradingConfig.TAKE_PROFIT_THRESHOLD) {
+		// Check take profit (inverted for short positions)
+		const takeProfitHit = position.isLong
+			? priceDiff >= tradingConfig.TAKE_PROFIT_THRESHOLD
+			: priceDiff <= -tradingConfig.TAKE_PROFIT_THRESHOLD;
+		if (takeProfitHit) {
 			logger.info('Take profit triggered', ctx, {
 				entryPrice: position.entryPrice,
 				currentPrice: actualPrice,
 				priceDiff: (priceDiff * 100).toFixed(4) + '%',
-				threshold: (tradingConfig.TAKE_PROFIT_THRESHOLD * 100).toFixed(2) + '%'
+				threshold: (tradingConfig.TAKE_PROFIT_THRESHOLD * 100).toFixed(2) + '%',
+				direction: position.isLong ? 'LONG' : 'SHORT'
 			});
 
 			await closePositionWithSignal(
@@ -597,25 +605,33 @@ export async function checkAndClosePositions(
 			priceDiff: (priceDiff * 100).toFixed(4) + '%'
 		});
 
-		// Check stop loss
-		if (priceDiff <= tradingConfig.STOP_LOSS_THRESHOLD) {
+		// Check stop loss (inverted for short positions)
+		const stopLossHit = position.isLong
+			? priceDiff <= tradingConfig.STOP_LOSS_THRESHOLD
+			: priceDiff >= -tradingConfig.STOP_LOSS_THRESHOLD;
+		if (stopLossHit) {
 			logger.warn('Stop loss triggered', ctx, {
 				entryPrice: position.entryPrice,
 				currentPrice: actualPrice,
 				priceDiff: (priceDiff * 100).toFixed(4) + '%',
-				threshold: (tradingConfig.STOP_LOSS_THRESHOLD * 100).toFixed(2) + '%'
+				threshold: (tradingConfig.STOP_LOSS_THRESHOLD * 100).toFixed(2) + '%',
+				direction: position.isLong ? 'LONG' : 'SHORT'
 			});
 			await closePositionWithExitType(adapter, env, symbol, position, actualPrice, 'STOP_LOSS');
 			return;
 		}
 
-		// Check take profit
-		if (priceDiff >= tradingConfig.TAKE_PROFIT_THRESHOLD) {
+		// Check take profit (inverted for short positions)
+		const takeProfitHit = position.isLong
+			? priceDiff >= tradingConfig.TAKE_PROFIT_THRESHOLD
+			: priceDiff <= -tradingConfig.TAKE_PROFIT_THRESHOLD;
+		if (takeProfitHit) {
 			logger.info('Take profit triggered', ctx, {
 				entryPrice: position.entryPrice,
 				currentPrice: actualPrice,
 				priceDiff: (priceDiff * 100).toFixed(4) + '%',
-				threshold: (tradingConfig.TAKE_PROFIT_THRESHOLD * 100).toFixed(2) + '%'
+				threshold: (tradingConfig.TAKE_PROFIT_THRESHOLD * 100).toFixed(2) + '%',
+				direction: position.isLong ? 'LONG' : 'SHORT'
 			});
 			await closePositionWithExitType(adapter, env, symbol, position, actualPrice, 'TAKE_PROFIT');
 			return;
