@@ -27,6 +27,14 @@ export function SignalBadge({ signal }: SignalBadgeProps) {
 		return dayjs(timestamp).format('lll');
 	};
 
+	const getScoreColor = (score: number) => {
+		if (score > 0) return 'text-success';
+		if (score < 0) return 'text-danger';
+		return 'text-text-muted';
+	};
+
+	const indicators = signal.indicators;
+
 	return (
 		<div className="card border-l-4 border-l-primary">
 			<div className="flex items-start justify-between">
@@ -77,6 +85,24 @@ export function SignalBadge({ signal }: SignalBadgeProps) {
 					<div className="text-xs text-text-muted">TA Score</div>
 				</div>
 			</div>
+
+			{/* Individual Scores Breakdown - Always Visible */}
+			{indicators && (
+				<div className="mt-3 pt-2 border-t border-surface/50 flex gap-4 text-xs">
+					<span className={getScoreColor(indicators.vwap)}>
+						VWAP: {formatScore(indicators.vwap, 1)}
+					</span>
+					<span className={getScoreColor(indicators.bbands)}>
+						BBands: {formatScore(indicators.bbands, 1)}
+					</span>
+					<span className={getScoreColor(indicators.rsi)}>
+						RSI: {formatScore(indicators.rsi, 1)}
+					</span>
+					<span className={getScoreColor(indicators.obv)}>
+						OBV: {formatScore(indicators.obv, 1)}
+					</span>
+				</div>
+			)}
 		</div>
 	);
 }
