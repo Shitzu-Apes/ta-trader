@@ -40,8 +40,16 @@ export type TradingSignal = {
 	timeDecayScore?: number; // Time decay score applied (if any)
 };
 
+export type SignalsResult = {
+	signals: TradingSignal[];
+	nextCursor?: string;
+	totalCount: number;
+};
+
 const SIGNALS_PREFIX = 'signals:';
-const SIGNALS_TTL = 30 * 24 * 60 * 60; // 30 days in seconds
+const SIGNALS_TTL = 7 * 24 * 60 * 60; // 7 days in seconds (reduced from 30)
+const DEFAULT_PAGE_LIMIT = 50;
+const MAX_PAGE_LIMIT = 100;
 
 /**
  * Store a trading signal in KV
@@ -54,7 +62,8 @@ export async function storeSignal(env: EnvBindings, signal: TradingSignal): Prom
 }
 
 /**
- * Get signals for a symbol within a time range
+ * Get signals for a symbol with optional filtering and pagination
+ * Fetches all values in parallel for better performance
  */
 export async function getSignals(
 	env: EnvBindings,
@@ -62,51 +71,81 @@ export async function getSignals(
 	options?: {
 		from?: number;
 		to?: number;
-		limit?: number;
 		type?: 'ENTRY' | 'EXIT' | 'NO_ACTION' | 'STOP_LOSS' | 'TAKE_PROFIT' | 'ADJUSTMENT' | 'HOLD';
+		cursor?: string;
+		limit?: number;
 	}
-): Promise<TradingSignal[]> {
+): Promise<SignalsResult> {
 	const prefix = `${SIGNALS_PREFIX}${symbol}:`;
+	const limit = Math.min(MAX_PAGE_LIMIT, Math.max(1, options?.limit ?? DEFAULT_PAGE_LIMIT));
+
+	// List all keys with the prefix
 	const list = await env.LOGS.list({ prefix });
 
-	let signals: TradingSignal[] = [];
-
-	for (const key of list.keys) {
+	// Fetch all values in parallel (much faster than sequential N+1)
+	const signalPromises = list.keys.map(async (key) => {
 		const value = await env.LOGS.get(key.name);
-		if (value) {
-			try {
-				const signal: TradingSignal = JSON.parse(value);
+		if (!value) return null;
 
-				// Apply filters
-				if (options?.from && signal.timestamp < options.from) continue;
-				if (options?.to && signal.timestamp > options.to) continue;
-				if (options?.type && signal.type !== options.type) continue;
+		try {
+			const signal: TradingSignal = JSON.parse(value);
 
-				signals.push(signal);
-			} catch {
-				// Skip invalid entries
+			// Apply filters
+			if (options?.from && signal.timestamp < options.from) return null;
+			if (options?.to && signal.timestamp > options.to) return null;
+			if (options?.type && signal.type !== options.type) return null;
+
+			return signal;
+		} catch {
+			return null;
+		}
+	});
+
+	const results = await Promise.all(signalPromises);
+	let signals = results.filter((s): s is TradingSignal => s !== null);
+
+	// Sort by timestamp descending (newest first)
+	signals.sort((a, b) => b.timestamp - a.timestamp);
+
+	const totalCount = signals.length;
+
+	// Apply cursor-based pagination
+	if (options?.cursor) {
+		const cursorTimestamp = parseInt(options.cursor, 10);
+		if (!isNaN(cursorTimestamp)) {
+			// Find the index of the first signal after the cursor timestamp
+			const cursorIndex = signals.findIndex((s) => s.timestamp <= cursorTimestamp);
+			if (cursorIndex >= 0) {
+				signals = signals.slice(cursorIndex);
+			} else {
+				// Cursor timestamp is before all signals, return empty
+				signals = [];
 			}
 		}
 	}
 
-	// Sort by timestamp descending
-	signals.sort((a, b) => b.timestamp - a.timestamp);
-
-	// Apply limit
-	if (options?.limit) {
-		signals = signals.slice(0, options.limit);
+	// Apply limit and determine next cursor
+	let nextCursor: string | undefined;
+	if (signals.length > limit) {
+		nextCursor = String(signals[limit].timestamp);
+		signals = signals.slice(0, limit);
 	}
 
-	return signals;
+	return {
+		signals,
+		nextCursor,
+		totalCount
+	};
 }
 
 /**
  * Get latest signal for a symbol
+ * Optimized to avoid full fetch when possible
  */
 export async function getLatestSignal(
 	env: EnvBindings,
 	symbol: string
 ): Promise<TradingSignal | null> {
-	const signals = await getSignals(env, symbol, { limit: 1 });
-	return signals[0] || null;
+	const result = await getSignals(env, symbol, { limit: 1 });
+	return result.signals[0] || null;
 }

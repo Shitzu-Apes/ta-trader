@@ -85,7 +85,12 @@ export interface Signal {
 export interface SignalsData {
 	symbol: string;
 	count: number;
+	totalCount: number;
 	signals: Signal[];
+	pagination: {
+		hasMore: boolean;
+		nextCursor?: string;
+	};
 }
 
 export interface LogEntry {

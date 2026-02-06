@@ -28,8 +28,14 @@ export const api = {
 	getLatest: (symbol: string) => fetchJson<LatestData>(`${API_BASE}/api/latest/${symbol}`),
 	getHistory: (symbol: string, limit = 100) =>
 		fetchJson<HistoricalData>(`${API_BASE}/api/history/${symbol}?limit=${limit}`),
-	getSignals: (symbol: string, limit = 50) =>
-		fetchJson<SignalsData>(`${API_BASE}/api/signals/${symbol}?limit=${limit}`),
+	getSignals: (symbol: string, limit = 50, cursor?: string) => {
+		const params = new URLSearchParams();
+		params.append('limit', String(limit));
+		if (cursor) {
+			params.append('cursor', cursor);
+		}
+		return fetchJson<SignalsData>(`${API_BASE}/api/signals/${symbol}?${params.toString()}`);
+	},
 	getLatestSignal: (symbol: string) =>
 		fetchJson<{ symbol: string; signal: SignalsData['signals'][0] }>(
 			`${API_BASE}/api/signals/${symbol}/latest`

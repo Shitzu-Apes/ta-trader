@@ -588,7 +588,7 @@ app.get('/logs/:id', async (c) => {
 	}
 });
 
-// Get trading signals for a symbol
+// Get trading signals for a symbol with pagination
 app.get('/signals/:symbol', async (c) => {
 	const symbol = c.req.param('symbol');
 
@@ -598,6 +598,7 @@ app.get('/signals/:symbol', async (c) => {
 
 	try {
 		const limit = Number(c.req.query('limit') ?? '50');
+		const cursor = c.req.query('cursor') ?? undefined;
 		const from = c.req.query('from');
 		const to = c.req.query('to');
 		const type = c.req.query('type') as
@@ -610,12 +611,13 @@ app.get('/signals/:symbol', async (c) => {
 			| 'HOLD'
 			| undefined;
 
-		if (isNaN(limit) || limit < 1 || limit > 1000) {
-			return c.json({ error: 'Invalid limit. Must be between 1 and 1000' }, 400);
+		if (isNaN(limit) || limit < 1 || limit > 100) {
+			return c.json({ error: 'Invalid limit. Must be between 1 and 100' }, 400);
 		}
 
-		const signals = await getSignals(c.env, symbol, {
+		const result = await getSignals(c.env, symbol, {
 			limit,
+			cursor,
 			from: from ? parseInt(from) : undefined,
 			to: to ? parseInt(to) : undefined,
 			type
@@ -623,8 +625,13 @@ app.get('/signals/:symbol', async (c) => {
 
 		return c.json({
 			symbol,
-			count: signals.length,
-			signals
+			count: result.signals.length,
+			totalCount: result.totalCount,
+			signals: result.signals,
+			pagination: {
+				hasMore: !!result.nextCursor,
+				nextCursor: result.nextCursor
+			}
 		});
 	} catch (error) {
 		console.error('Error fetching signals:', error);

@@ -59,10 +59,10 @@ export function useHistory(symbol: string, limit = 100) {
 	});
 }
 
-export function useSignals(symbol: string, limit = 50) {
+export function useSignals(symbol: string, limit = 50, cursor?: string) {
 	return useQuery({
-		queryKey: ['signals', symbol, limit],
-		queryFn: () => api.getSignals(symbol, limit),
+		queryKey: ['signals', symbol, limit, cursor],
+		queryFn: () => api.getSignals(symbol, limit, cursor),
 		refetchInterval: REFRESH_INTERVAL,
 		staleTime: 25000,
 		enabled: !!symbol
