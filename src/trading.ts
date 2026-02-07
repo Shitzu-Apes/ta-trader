@@ -2,7 +2,6 @@ import { ExchangeType, TradingAdapter } from './adapters';
 import {
 	getTradingConfig,
 	TRADING_CONFIG,
-	MAX_ORDER_SIZE_USD,
 	MAX_LEVERAGE_PER_SYMBOL,
 	MAX_ACCOUNT_LEVERAGE,
 	POSITION_SIZING_CONFIG,
@@ -170,12 +169,8 @@ function calculateTargetPositionSize(
 	// Normalize TA score to 0-1 intensity
 	const intensity = calculateTaIntensity(taScore);
 
-	// Calculate target size
-	let targetSize = maxPositionSize * intensity;
-
-	// Apply liquidity cap
-	const liquidityCap = MAX_ORDER_SIZE_USD[symbol];
-	targetSize = Math.min(targetSize, liquidityCap);
+	// Calculate target size (proportional to balance, leverage, and TA intensity)
+	const targetSize = maxPositionSize * intensity;
 
 	return { targetSize, intensity, availableLeverage: effectiveMaxLeverage };
 }
