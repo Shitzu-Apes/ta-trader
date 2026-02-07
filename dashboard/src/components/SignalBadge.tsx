@@ -107,7 +107,7 @@ export function SignalBadge({ signal }: SignalBadgeProps) {
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm mb-2">
 				{signal.positionSize !== undefined && signal.positionSize !== 0 && (
 					<span className="text-text-muted">
-						Size: <span className="text-text">{formatNumber(signal.positionSize, 2)}</span>
+						Size: <span className="text-text">{formatCurrency(signal.positionSize, 2)}</span>
 					</span>
 				)}
 				{signal.entryPrice !== undefined && signal.entryPrice !== 0 && (

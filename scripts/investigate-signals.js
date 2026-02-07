@@ -195,7 +195,7 @@ async function investigateSignals(env, symbol, limit) {
 			console.log(`   Threshold: ${formatNumber(signal.threshold, 2)}`);
 			console.log(`   Price: ${formatCurrency(signal.price)}`);
 			console.log(`   Entry Price: ${formatCurrency(signal.entryPrice)}`);
-			console.log(`   Position Size: ${formatNumber(signal.positionSize, 6)}`);
+			console.log(`   Position Size: ${formatCurrency(signal.positionSize)}`);
 			console.log(`   Unrealized PnL: ${formatCurrency(signal.unrealizedPnl)}`);
 			console.log(`   Realized PnL: ${formatCurrency(signal.realizedPnl)}`);
 		} else if (signal.type === 'HOLD') {
@@ -204,7 +204,7 @@ async function investigateSignals(env, symbol, limit) {
 			console.log(`   Threshold: ${formatNumber(signal.threshold, 2)}`);
 			console.log(`   Price: ${formatCurrency(signal.price)}`);
 			console.log(`   Entry Price: ${formatCurrency(signal.entryPrice)}`);
-			console.log(`   Position Size: ${formatNumber(signal.positionSize, 6)}`);
+			console.log(`   Position Size: ${formatCurrency(signal.positionSize)}`);
 			console.log(`   Unrealized PnL: ${formatCurrency(signal.unrealizedPnl)}`);
 		} else {
 			console.log(`   TA Score: ${formatNumber(signal.taScore, 2)}`);

@@ -498,7 +498,7 @@ export async function analyzeForecast(
 			taScore,
 			threshold: thresholds.sell,
 			price: actualPrice,
-			positionSize: position.size,
+			positionSize: Math.abs(position.size * actualPrice),
 			entryPrice: position.entryPrice,
 			unrealizedPnl: position.unrealizedPnl,
 			realizedPnl: position.realizedPnl,
@@ -741,7 +741,7 @@ export async function checkSignalReversal(
 				taScore,
 				threshold: thresholds.sell,
 				price: actualPrice,
-				positionSize: position.size,
+				positionSize: Math.abs(position.size * actualPrice),
 				entryPrice: position.entryPrice,
 				unrealizedPnl: position.unrealizedPnl,
 				realizedPnl: position.realizedPnl,
@@ -810,7 +810,7 @@ async function closePositionWithSignal(
 					? getTradingConfig(env).TAKE_PROFIT_THRESHOLD
 					: 0,
 		price,
-		positionSize: position.size,
+		positionSize: Math.abs(position.size * price),
 		entryPrice: position.entryPrice,
 		unrealizedPnl: position.unrealizedPnl,
 		realizedPnl: position.realizedPnl,
@@ -897,7 +897,7 @@ async function closePositionWithExitType(
 				? tradingConfig.STOP_LOSS_THRESHOLD
 				: tradingConfig.TAKE_PROFIT_THRESHOLD,
 		price,
-		positionSize: position.size,
+		positionSize: Math.abs(position.size * price),
 		entryPrice: position.entryPrice,
 		unrealizedPnl: position.unrealizedPnl,
 		realizedPnl: position.realizedPnl
