@@ -320,15 +320,15 @@ export function Overview() {
 
 			{/* Quick Links */}
 			<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-				<a href="#/positions" className="card hover:bg-surface-hover transition-colors">
+				<a href="/positions" className="card hover:bg-surface-hover transition-colors">
 					<h3 className="font-medium text-text">View All Positions →</h3>
 					<p className="text-sm text-text-muted mt-1">Detailed position management</p>
 				</a>
-				<a href="#/market" className="card hover:bg-surface-hover transition-colors">
+				<a href="/markets" className="card hover:bg-surface-hover transition-colors">
 					<h3 className="font-medium text-text">Market Data →</h3>
 					<p className="text-sm text-text-muted mt-1">Technical indicators and analysis</p>
 				</a>
-				<a href="#/logs" className="card hover:bg-surface-hover transition-colors">
+				<a href="/logs" className="card hover:bg-surface-hover transition-colors">
 					<h3 className="font-medium text-text">View Logs →</h3>
 					<p className="text-sm text-text-muted mt-1">System logs and errors</p>
 				</a>
