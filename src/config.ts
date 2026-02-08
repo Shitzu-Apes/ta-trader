@@ -42,7 +42,11 @@ export const BASE_TRADING_CONFIG = {
 	POSITION_THRESHOLDS: {
 		long: { buy: 2, sell: -0.2 },
 		short: { buy: -2, sell: 0.2 }
-	}
+	},
+
+	// Consecutive signal threshold for position entry
+	// TA score must exceed threshold this many times in a row before opening
+	CONSECUTIVE_SIGNAL_THRESHOLD: 2
 } as const;
 
 // Max leverage per symbol (how much leverage to use for each symbol)

@@ -152,3 +152,45 @@ export async function getLatestSignal(
 	const result = await getSignals(env, symbol, { limit: 1 });
 	return result.signals[0] || null;
 }
+
+/**
+ * Check if the last N signals have consecutively exceeded the entry threshold in the same direction
+ * @returns Object with hasConsecutive flag and count of consecutive signals
+ */
+export function checkConsecutiveSignals(
+	signals: TradingSignal[],
+	threshold: number,
+	requiredConsecutive: number,
+	direction: 'LONG' | 'SHORT'
+): { hasConsecutive: boolean; consecutiveCount: number } {
+	if (signals.length < requiredConsecutive) {
+		return { hasConsecutive: false, consecutiveCount: signals.length };
+	}
+
+	// Take only the most recent signals
+	const recentSignals = signals.slice(0, requiredConsecutive);
+
+	// Check if all signals exceed threshold in the correct direction
+	let consecutiveCount = 0;
+	for (const signal of recentSignals) {
+		if (direction === 'LONG') {
+			if (signal.taScore > threshold) {
+				consecutiveCount++;
+			} else {
+				break;
+			}
+		} else {
+			// SHORT direction
+			if (signal.taScore < threshold) {
+				consecutiveCount++;
+			} else {
+				break;
+			}
+		}
+	}
+
+	return {
+		hasConsecutive: consecutiveCount >= requiredConsecutive,
+		consecutiveCount
+	};
+}

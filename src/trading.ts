@@ -14,7 +14,7 @@ import {
 	calculateVwapScore
 } from './indicators';
 import { getLogger, createContext } from './logger';
-import { storeSignal, getSignals, TradingSignal } from './signals';
+import { storeSignal, getSignals, TradingSignal, checkConsecutiveSignals } from './signals';
 import { EnvBindings } from './types';
 
 export type Position = {
@@ -583,6 +583,46 @@ export async function analyzeForecast(
 			await storeSignal(_env, noActionSignal);
 			return;
 		}
+
+		// Check consecutive signal threshold for entry
+		const recentSignalsResult = await getSignals(_env, symbol, {
+			limit: TRADING_CONFIG.CONSECUTIVE_SIGNAL_THRESHOLD
+		});
+		const consecutiveCheck = checkConsecutiveSignals(
+			recentSignalsResult.signals,
+			thresholds.buy,
+			TRADING_CONFIG.CONSECUTIVE_SIGNAL_THRESHOLD,
+			direction
+		);
+
+		if (!consecutiveCheck.hasConsecutive) {
+			logger.info('Consecutive signal threshold not met, skipping entry', ctx, {
+				taScore,
+				requiredConsecutive: TRADING_CONFIG.CONSECUTIVE_SIGNAL_THRESHOLD,
+				actualConsecutive: consecutiveCheck.consecutiveCount,
+				direction
+			});
+
+			const noActionSignal: TradingSignal = {
+				symbol,
+				timestamp: Date.now(),
+				type: 'NO_ACTION',
+				taScore,
+				threshold: thresholds.buy,
+				price: actualPrice,
+				indicators: indicatorScores,
+				intensity,
+				availableLeverage,
+				direction,
+				reason: 'BELOW_THRESHOLD'
+			};
+			await storeSignal(_env, noActionSignal);
+			return;
+		}
+
+		logger.info('Consecutive signal threshold met', ctx, {
+			consecutiveCount: consecutiveCheck.consecutiveCount
+		});
 
 		logger.info(`Opening new ${direction} position`, ctx, {
 			taScore,
