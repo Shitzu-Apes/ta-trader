@@ -14,7 +14,7 @@ import {
 	calculateVwapScore
 } from './indicators';
 import { getLogger, createContext } from './logger';
-import { storeSignal, TradingSignal } from './signals';
+import { storeSignal, getSignals, TradingSignal } from './signals';
 import { EnvBindings } from './types';
 
 export type Position = {
@@ -411,12 +411,29 @@ export async function analyzeForecast(
 		}
 
 		// Same direction - check if we need to adjust position size
+		// Get initial notional size from the entry signal as baseline
+		let initialNotionalSize: number | undefined;
+		try {
+			const entrySignalResult = await getSignals(_env, symbol, { type: 'ENTRY', limit: 1 });
+			if (
+				entrySignalResult.signals.length > 0 &&
+				entrySignalResult.signals[0].initialNotionalSize
+			) {
+				initialNotionalSize = entrySignalResult.signals[0].initialNotionalSize;
+			}
+		} catch (_error) {
+			logger.warn('Failed to fetch entry signal, using current position value', ctx);
+		}
+
 		// Convert position size (base tokens) to notional value (USDC) for comparison
 		// Use absolute value since position.size is negative for shorts
 		const currentNotionalValue = Math.abs(position.size * actualPrice);
-		const sizeDiff = targetSize - currentNotionalValue;
+
+		// Use initial notional size as baseline if available, otherwise fall back to current
+		const baselineNotionalSize = initialNotionalSize || currentNotionalValue;
+		const sizeDiff = targetSize - baselineNotionalSize;
 		const adjustmentThreshold =
-			currentNotionalValue * POSITION_SIZING_CONFIG.POSITION_ADJUSTMENT_THRESHOLD_PERCENT;
+			baselineNotionalSize * POSITION_SIZING_CONFIG.POSITION_ADJUSTMENT_THRESHOLD_PERCENT;
 
 		if (
 			Math.abs(sizeDiff) > adjustmentThreshold &&
@@ -425,6 +442,8 @@ export async function analyzeForecast(
 			if (sizeDiff > 0) {
 				// Increase position
 				logger.info('Increasing position size', ctx, {
+					baselineNotionalSize,
+					initialNotionalSize,
 					currentNotionalValue,
 					targetSize,
 					increaseBy: sizeDiff,
@@ -449,6 +468,8 @@ export async function analyzeForecast(
 				// Decrease position (partial close)
 				const decreaseSize = Math.abs(sizeDiff);
 				logger.info('Decreasing position size', ctx, {
+					baselineNotionalSize,
+					initialNotionalSize,
 					currentNotionalValue,
 					targetSize,
 					decreaseBy: decreaseSize,
@@ -1011,6 +1032,7 @@ async function openPosition(
 			threshold: 0,
 			price,
 			positionSize: size,
+			initialNotionalSize: size,
 			indicators,
 			intensity,
 			availableLeverage

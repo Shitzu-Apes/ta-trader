@@ -33,6 +33,7 @@ export type TradingSignal = {
 	// Dynamic position sizing fields
 	targetSize?: number; // Target position size calculated
 	currentSize?: number; // Current position size before adjustment
+	initialNotionalSize?: number; // Initial notional size when position was opened
 	intensity?: number; // TA score intensity (0-1)
 	availableLeverage?: number; // Available leverage at decision time
 	// Score multipliers
