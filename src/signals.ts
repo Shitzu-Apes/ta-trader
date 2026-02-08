@@ -86,31 +86,32 @@ function rowToSignal(row: Record<string, unknown>): TradingSignal {
 
 /**
  * Convert TradingSignal to database row
+ * Converts undefined values to null for D1 compatibility
  */
 function signalToRow(signal: TradingSignal): Record<string, unknown> {
 	return {
 		symbol: signal.symbol,
 		timestamp: signal.timestamp,
 		type: signal.type,
-		direction: signal.direction,
-		action: signal.action,
-		reason: signal.reason,
+		direction: signal.direction ?? null,
+		action: signal.action ?? null,
+		reason: signal.reason ?? null,
 		ta_score: signal.taScore,
 		threshold: signal.threshold,
 		price: signal.price,
-		position_size: signal.positionSize,
-		entry_price: signal.entryPrice,
-		unrealized_pnl: signal.unrealizedPnl,
-		realized_pnl: signal.realizedPnl,
+		position_size: signal.positionSize ?? null,
+		entry_price: signal.entryPrice ?? null,
+		unrealized_pnl: signal.unrealizedPnl ?? null,
+		realized_pnl: signal.realizedPnl ?? null,
 		indicators: signal.indicators ? JSON.stringify(signal.indicators) : null,
-		target_size: signal.targetSize,
-		current_size: signal.currentSize,
-		initial_notional_size: signal.initialNotionalSize,
-		intensity: signal.intensity,
-		available_leverage: signal.availableLeverage,
-		profit_score: signal.profitScore,
-		time_decay_score: signal.timeDecayScore,
-		consensus_status: signal.consensusStatus
+		target_size: signal.targetSize ?? null,
+		current_size: signal.currentSize ?? null,
+		initial_notional_size: signal.initialNotionalSize ?? null,
+		intensity: signal.intensity ?? null,
+		available_leverage: signal.availableLeverage ?? null,
+		profit_score: signal.profitScore ?? null,
+		time_decay_score: signal.timeDecayScore ?? null,
+		consensus_status: signal.consensusStatus ?? null
 	};
 }
 
