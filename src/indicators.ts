@@ -54,6 +54,7 @@ export function calculateRsiScore(rsi: number): number {
  * - Negative: Price near upper band (bearish)
  * - Positive: Price near lower band (bullish)
  * - Zero: Price in the middle
+ * Uses power-based flattening to reduce extreme scores when price breaks bands
  */
 export function calculateBBandsScore(
 	currentPrice: number,
@@ -63,7 +64,12 @@ export function calculateBBandsScore(
 	const middleBand = (upperBand + lowerBand) / 2;
 	const totalRange = upperBand - lowerBand;
 	const pricePosition = (currentPrice - middleBand) / (totalRange / 2);
-	return -pricePosition * TRADING_CONFIG.BBANDS_MULTIPLIER;
+
+	// Power-based flattening: reduces extreme scores while preserving direction
+	// Exponent 0.7 provides good balance between sensitivity and flattening
+	const flattenedPosition = Math.sign(pricePosition) * Math.pow(Math.abs(pricePosition), 0.7);
+
+	return -flattenedPosition * TRADING_CONFIG.BBANDS_MULTIPLIER;
 }
 
 /**
