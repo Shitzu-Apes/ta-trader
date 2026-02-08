@@ -31,16 +31,16 @@ export type TradingSignal = {
 		total?: number;
 	};
 	// Dynamic position sizing fields
-	targetSize?: number; // Target position size calculated
-	currentSize?: number; // Current position size before adjustment
-	initialNotionalSize?: number; // Initial notional size when position was opened
-	intensity?: number; // TA score intensity (0-1)
-	availableLeverage?: number; // Available leverage at decision time
+	targetSize?: number;
+	currentSize?: number;
+	initialNotionalSize?: number;
+	intensity?: number;
+	availableLeverage?: number;
 	// Score multipliers
-	profitScore?: number; // Profit score applied (if any)
-	timeDecayScore?: number; // Time decay score applied (if any)
+	profitScore?: number;
+	timeDecayScore?: number;
 	// Consensus check info
-	consensusStatus?: 'long' | 'short' | 'none'; // Indicates if indicators agreed on direction
+	consensusStatus?: 'long' | 'short' | 'none';
 };
 
 export type SignalsResult = {
@@ -49,24 +49,91 @@ export type SignalsResult = {
 	totalCount: number;
 };
 
-const SIGNALS_PREFIX = 'signals:';
-const SIGNALS_TTL = 7 * 24 * 60 * 60; // 7 days in seconds (reduced from 30)
+// Keep constants for backwards compatibility
+const SIGNALS_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
 const DEFAULT_PAGE_LIMIT = 50;
 const MAX_PAGE_LIMIT = 100;
 
 /**
- * Store a trading signal in KV
+ * Convert database row to TradingSignal
+ */
+function rowToSignal(row: Record<string, unknown>): TradingSignal {
+	return {
+		symbol: row.symbol as string,
+		timestamp: row.timestamp as number,
+		type: row.type as TradingSignal['type'],
+		direction: row.direction as TradingSignal['direction'],
+		action: row.action as TradingSignal['action'],
+		reason: row.reason as TradingSignal['reason'],
+		taScore: row.ta_score as number,
+		threshold: row.threshold as number,
+		price: row.price as number,
+		positionSize: row.position_size as number | undefined,
+		entryPrice: row.entry_price as number | undefined,
+		unrealizedPnl: row.unrealized_pnl as number | undefined,
+		realizedPnl: row.realized_pnl as number | undefined,
+		indicators: row.indicators ? JSON.parse(row.indicators as string) : undefined,
+		targetSize: row.target_size as number | undefined,
+		currentSize: row.current_size as number | undefined,
+		initialNotionalSize: row.initial_notional_size as number | undefined,
+		intensity: row.intensity as number | undefined,
+		availableLeverage: row.available_leverage as number | undefined,
+		profitScore: row.profit_score as number | undefined,
+		timeDecayScore: row.time_decay_score as number | undefined,
+		consensusStatus: row.consensus_status as TradingSignal['consensusStatus']
+	};
+}
+
+/**
+ * Convert TradingSignal to database row
+ */
+function signalToRow(signal: TradingSignal): Record<string, unknown> {
+	return {
+		symbol: signal.symbol,
+		timestamp: signal.timestamp,
+		type: signal.type,
+		direction: signal.direction,
+		action: signal.action,
+		reason: signal.reason,
+		ta_score: signal.taScore,
+		threshold: signal.threshold,
+		price: signal.price,
+		position_size: signal.positionSize,
+		entry_price: signal.entryPrice,
+		unrealized_pnl: signal.unrealizedPnl,
+		realized_pnl: signal.realizedPnl,
+		indicators: signal.indicators ? JSON.stringify(signal.indicators) : null,
+		target_size: signal.targetSize,
+		current_size: signal.currentSize,
+		initial_notional_size: signal.initialNotionalSize,
+		intensity: signal.intensity,
+		available_leverage: signal.availableLeverage,
+		profit_score: signal.profitScore,
+		time_decay_score: signal.timeDecayScore,
+		consensus_status: signal.consensusStatus
+	};
+}
+
+/**
+ * Store a trading signal in D1
  */
 export async function storeSignal(env: EnvBindings, signal: TradingSignal): Promise<void> {
-	const key = `${SIGNALS_PREFIX}${signal.symbol}:${signal.timestamp}`;
-	await env.LOGS.put(key, JSON.stringify(signal), {
-		expirationTtl: SIGNALS_TTL
-	});
+	const row = signalToRow(signal);
+
+	const columns = Object.keys(row).join(', ');
+	const placeholders = Object.keys(row)
+		.map(() => '?')
+		.join(', ');
+	const values = Object.values(row);
+
+	await env.DB.prepare(`INSERT INTO signals (${columns}) VALUES (${placeholders})`)
+		.bind(...values)
+		.run();
 }
 
 /**
  * Get signals for a symbol with optional filtering and pagination
- * Fetches all values in parallel for better performance
+ * Uses D1 for efficient querying with proper LIMIT support
  */
 export async function getSignals(
 	env: EnvBindings,
@@ -79,60 +146,64 @@ export async function getSignals(
 		limit?: number;
 	}
 ): Promise<SignalsResult> {
-	const prefix = `${SIGNALS_PREFIX}${symbol}:`;
 	const limit = Math.min(MAX_PAGE_LIMIT, Math.max(1, options?.limit ?? DEFAULT_PAGE_LIMIT));
 
-	// List all keys with the prefix
-	const list = await env.LOGS.list({ prefix });
+	// Build query dynamically
+	const conditions: string[] = ['symbol = ?'];
+	const params: (string | number)[] = [symbol];
 
-	// Fetch all values in parallel (much faster than sequential N+1)
-	const signalPromises = list.keys.map(async (key) => {
-		const value = await env.LOGS.get(key.name);
-		if (!value) return null;
+	if (options?.type) {
+		conditions.push('type = ?');
+		params.push(options.type);
+	}
 
-		try {
-			const signal: TradingSignal = JSON.parse(value);
+	if (options?.from) {
+		conditions.push('timestamp >= ?');
+		params.push(options.from);
+	}
 
-			// Apply filters
-			if (options?.from && signal.timestamp < options.from) return null;
-			if (options?.to && signal.timestamp > options.to) return null;
-			if (options?.type && signal.type !== options.type) return null;
+	if (options?.to) {
+		conditions.push('timestamp <= ?');
+		params.push(options.to);
+	}
 
-			return signal;
-		} catch {
-			return null;
-		}
-	});
-
-	const results = await Promise.all(signalPromises);
-	let signals = results.filter((s): s is TradingSignal => s !== null);
-
-	// Sort by timestamp descending (newest first)
-	signals.sort((a, b) => b.timestamp - a.timestamp);
-
-	const totalCount = signals.length;
-
-	// Apply cursor-based pagination
+	// Handle cursor-based pagination (timestamp-based)
 	if (options?.cursor) {
 		const cursorTimestamp = parseInt(options.cursor, 10);
 		if (!isNaN(cursorTimestamp)) {
-			// Find the index of the first signal after the cursor timestamp
-			const cursorIndex = signals.findIndex((s) => s.timestamp <= cursorTimestamp);
-			if (cursorIndex >= 0) {
-				signals = signals.slice(cursorIndex);
-			} else {
-				// Cursor timestamp is before all signals, return empty
-				signals = [];
-			}
+			conditions.push('timestamp < ?');
+			params.push(cursorTimestamp);
 		}
 	}
 
-	// Apply limit and determine next cursor
+	const whereClause = conditions.join(' AND ');
+
+	// Get total count for pagination info
+	const countResult = await env.DB.prepare(
+		`SELECT COUNT(*) as count FROM signals WHERE ${whereClause}`
+	)
+		.bind(...params)
+		.first<{ count: number }>();
+	const totalCount = countResult?.count ?? 0;
+
+	// Get signals with LIMIT - properly bounded query
+	const query = `SELECT * FROM signals WHERE ${whereClause} ORDER BY timestamp DESC LIMIT ?`;
+	params.push(limit + 1); // Fetch one extra to determine if there's a next page
+
+	const results = await env.DB.prepare(query)
+		.bind(...params)
+		.all<Record<string, unknown>>();
+	const rows = results.results || [];
+
+	// Check if there's a next page
 	let nextCursor: string | undefined;
-	if (signals.length > limit) {
-		nextCursor = String(signals[limit].timestamp);
-		signals = signals.slice(0, limit);
+	if (rows.length > limit) {
+		const lastRow = rows[limit]; // The extra row
+		nextCursor = String(lastRow.timestamp);
+		rows.pop(); // Remove the extra row
 	}
+
+	const signals = rows.map(rowToSignal);
 
 	return {
 		signals,
@@ -143,14 +214,19 @@ export async function getSignals(
 
 /**
  * Get latest signal for a symbol
- * Optimized to avoid full fetch when possible
+ * Optimized single-row query
  */
 export async function getLatestSignal(
 	env: EnvBindings,
 	symbol: string
 ): Promise<TradingSignal | null> {
-	const result = await getSignals(env, symbol, { limit: 1 });
-	return result.signals[0] || null;
+	const result = await env.DB.prepare(
+		'SELECT * FROM signals WHERE symbol = ? ORDER BY timestamp DESC LIMIT 1'
+	)
+		.bind(symbol)
+		.first<Record<string, unknown>>();
+
+	return result ? rowToSignal(result) : null;
 }
 
 /**
@@ -193,4 +269,16 @@ export function checkConsecutiveSignals(
 		hasConsecutive: consecutiveCount >= requiredConsecutive,
 		consecutiveCount
 	};
+}
+
+/**
+ * Clean up old signals beyond TTL
+ * Should be called periodically to prevent unbounded growth
+ */
+export async function cleanupOldSignals(env: EnvBindings): Promise<number> {
+	const cutoffTime = Date.now() - SIGNALS_TTL;
+	const result = await env.DB.prepare('DELETE FROM signals WHERE timestamp < ?')
+		.bind(cutoffTime)
+		.run();
+	return result.meta?.changes ?? 0;
 }
