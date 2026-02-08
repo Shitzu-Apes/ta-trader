@@ -39,6 +39,8 @@ export type TradingSignal = {
 	// Score multipliers
 	profitScore?: number; // Profit score applied (if any)
 	timeDecayScore?: number; // Time decay score applied (if any)
+	// Consensus check info
+	consensusStatus?: 'long' | 'short' | 'none'; // Indicates if indicators agreed on direction
 };
 
 export type SignalsResult = {

@@ -90,6 +90,32 @@ function calculateTaScore(
 }
 
 /**
+ * Check if all indicators agree on direction (same sign)
+ * Returns null if mixed signs, otherwise returns 'long' or 'short'
+ */
+function checkIndicatorConsensus(indicators: {
+	vwap: number;
+	bbands: number;
+	rsi: number;
+	obv: number;
+}): 'long' | 'short' | null {
+	const { vwap, bbands, rsi, obv } = indicators;
+
+	// All indicators must be ≥ 0 for LONG
+	if (vwap >= 0 && bbands >= 0 && rsi >= 0 && obv >= 0) {
+		return 'long';
+	}
+
+	// All indicators must be ≤ 0 for SHORT
+	if (vwap <= 0 && bbands <= 0 && rsi <= 0 && obv <= 0) {
+		return 'short';
+	}
+
+	// Mixed signs - no consensus
+	return null;
+}
+
+/**
  * Calculate TA score intensity (0 to 1)
  */
 function calculateTaIntensity(taScore: number): number {
@@ -531,7 +557,32 @@ export async function analyzeForecast(
 
 	// No position - check if we should open a new one
 	if (Math.abs(taScore) > Math.abs(thresholds.buy)) {
+		const consensus = checkIndicatorConsensus(indicatorScores);
 		const direction = taScore > 0 ? 'LONG' : 'SHORT';
+
+		// Check if all indicators agree on direction
+		if (
+			consensus === null ||
+			(consensus === 'long' && direction !== 'LONG') ||
+			(consensus === 'short' && direction !== 'SHORT')
+		) {
+			// Store no-action signal with consensus info
+			const noActionSignal: TradingSignal = {
+				symbol,
+				timestamp: Date.now(),
+				type: 'NO_ACTION',
+				taScore,
+				threshold: thresholds.buy,
+				price: actualPrice,
+				indicators: indicatorScores,
+				intensity,
+				availableLeverage,
+				direction,
+				consensusStatus: consensus ?? 'none'
+			};
+			await storeSignal(_env, noActionSignal);
+			return;
+		}
 
 		logger.info(`Opening new ${direction} position`, ctx, {
 			taScore,
